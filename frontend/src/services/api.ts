@@ -197,7 +197,7 @@ export const compareUniversities = async (
   universityIds: string[]
 ): Promise<ApiResponse<{
   universities: University[];
-  comparison: any;
+  analysis: any;
   summary: string;
   highlights: Array<{
     type: 'success' | 'warning' | 'info';
@@ -209,15 +209,21 @@ export const compareUniversities = async (
     if (universityIds.length > 4) throw new Error('Cannot compare more than 4 universities');
     
     const response = await api.post('/api/compare', { universityIds });
-    //return response.data;
+    
     return {
-      success: response.data.success,
-      data: response.data.comparison,
+      success: true,
+      data: {
+        universities: response.data.universities,
+        analysis: response.data.analysis,
+        summary: response.data.summary,
+        highlights: response.data.highlights
+      },
       message: "Comparison completed successfully"
-    }
+    };
+    
   } catch (error: any) {
-    throw new Error(error.response?.data?.message || 'Failed to compare universities');
-    //console.log(error.response);
+    console.error('Compare API Error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.message || error.message || 'Failed to compare universities');
   }
 };
 

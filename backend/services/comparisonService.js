@@ -12,29 +12,63 @@ class ComparisonService {
     
     async compare(universityIds) {
         try {
+            console.log('Starting comparison with IDs:', universityIds);
+            
             // Fetch all universities
+            console.log('Fetching universities...');
             const universities = await Promise.all(
-                universityIds.map(id => this.searchService.getById(id))
+                universityIds.map(async (id, index) => {
+                    try {
+                        console.log(`Fetching university ${index + 1}:`, id);
+                        const result = await this.searchService.getById(id);
+                        console.log(`Result for ${id}:`, result ? 'Found' : 'Not found');
+                        return result;
+                    } catch (error) {
+                        console.error(`Error fetching university ${id}:`, error);
+                        throw error;
+                    }
+                })
             );
+            
+            console.log('Raw universities result:', universities.map(u => u ? u.name || u.id : 'null'));
             
             // Filter out any null results
             const validUniversities = universities.filter(u => u !== null);
+            console.log('Valid universities count:', validUniversities.length);
             
             if (validUniversities.length < 2) {
-                throw new Error('Not enough valid universities to compare');
+                throw new Error(`Not enough valid universities to compare. Found: ${validUniversities.length}`);
             }
             
-            // Structure comparison data
+            // Structure comparison data with error handling for each step
+            console.log('Starting analysis...');
+            const analysis = this.analyzeDifferences(validUniversities);
+            console.log('Analysis completed');
+            
+            console.log('Generating summary...');
+            const summary = this.generateSummary(validUniversities);
+            console.log('Summary completed');
+            
+            console.log('Getting highlights...');
+            const highlights = this.getHighlights(validUniversities);
+            console.log('Highlights completed');
+            
             const comparison = {
                 universities: validUniversities,
-                analysis: this.analyzeDifferences(validUniversities),
-                summary: this.generateSummary(validUniversities),
-                highlights: this.getHighlights(validUniversities)
+                analysis,
+                summary,
+                highlights
             };
             
+            console.log('Comparison completed successfully');
             return comparison;
+            
         } catch (error) {
-            console.error('Comparison error:', error);
+            console.error('Comparison error details:', {
+                message: error.message,
+                stack: error.stack,
+                universityIds
+            });
             throw error;
         }
     }

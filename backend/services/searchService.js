@@ -912,7 +912,23 @@ class SearchService {
         
         return 'Unknown University';
     }
-    
+
+    async getById(id) {
+        try {
+            console.log('SearchService.getById called with:', id);
+            
+            // Temporarily use sample data until Azure Search is populated
+            const sampleData = this.getSampleUniversities();
+            const result = sampleData.find(university => university.id === id);
+            
+            console.log(`Found result for ${id}:`, result ? 'Yes' : 'No');
+            return result || null;
+            
+        } catch (error) {
+            console.error(`SearchService.getById error for ID ${id}:`, error);
+            throw error;
+        }
+    }
     /**
      * Get all indexed documents
      */
