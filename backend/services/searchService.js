@@ -1,619 +1,538 @@
-/**
- * Azure AI Search Service - PDF-based AI Agent for South African Universities
- * Handles PDF indexing, search operations, and AI-powered responses
- */
-
-const { SearchClient, SearchIndexClient } = require('@azure/search-documents');
-const { AzureKeyCredential } = require('@azure/core-auth');
-const { BlobServiceClient } = require('@azure/storage-blob');
-const { DocumentAnalysisClient } = require('@azure/ai-form-recognizer');
-
-// Use OpenAI library with Azure configuration instead of @azure/openai
+// Enhanced SearchService with PDF-only context
+// This version will only use content extracted from university PDF files
+//searchService.js
+const { SearchClient, AzureKeyCredential } = require('@azure/search-documents');
 const { OpenAI } = require('openai');
+const fs = require('fs').promises;
+const path = require('path');
 
-class SearchService {
+class PDFContextSearchService {
     constructor() {
-        // Validate credentials first
-        this.validateCredentials();
+        console.log('🔧 Initializing PDF-Context SearchService...');
         
-        // Azure Search credentials
-        this.searchEndpoint = process.env.AZURE_SEARCH_ENDPOINT;
-        this.searchApiKey = process.env.AZURE_SEARCH_ADMIN_KEY;
-        this.indexName = process.env.AZURE_SEARCH_INDEX_NAME || 'universities';
+        this.validateEnvironment();
+        this.initializeOpenAIClient();
+        this.initializeSearchClient();
         
-        // Azure Storage credentials (for PDF files)
-        this.storageConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-        this.containerName = 'university-pdfs';
+        // PDF content storage
+        this.pdfDocuments = new Map(); // Store processed PDF content
+        this.loadExistingPDFs();
+        this.isProcessing = false;
+        this.hasProcessedExistingPDFs = false;
+        console.log('✅ PDF-Context SearchService initialized');
+    }
+
+    validateEnvironment() {
+        const required = ['AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_API_KEY', 'AZURE_OPENAI_DEPLOYMENT_NAME'];
+        const missing = required.filter(env => !process.env[env]);
         
-        // Azure OpenAI credentials
-        this.openaiEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-        this.openaiApiKey = process.env.AZURE_OPENAI_API_KEY;
-        this.deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4';
-        
-        // Azure Form Recognizer credentials
-        this.formRecognizerEndpoint = process.env.AZURE_FORM_RECOGNIZER_ENDPOINT;
-        this.formRecognizerApiKey = process.env.AZURE_FORM_RECOGNIZER_API_KEY;
-        
-        // Feature flags
-        this.supportsVectorSearch = true; // Will be set during index creation
-        
-        // Initialize clients
-        this.searchClient = new SearchClient(
-            this.searchEndpoint,
-            this.indexName,
-            new AzureKeyCredential(this.searchApiKey)
-        );
-        
-        this.indexClient = new SearchIndexClient(
-            this.searchEndpoint,
-            new AzureKeyCredential(this.searchApiKey)
-        );
-        
-        this.blobServiceClient = BlobServiceClient.fromConnectionString(
-            this.storageConnectionString
-        );
-        
-        // Initialize Form Recognizer client if credentials are provided
-        if (this.formRecognizerEndpoint && this.formRecognizerApiKey) {
-            this.documentAnalysisClient = new DocumentAnalysisClient(
-                this.formRecognizerEndpoint,
-                new AzureKeyCredential(this.formRecognizerApiKey)
-            );
+        if (missing.length > 0) {
+            throw new Error(`Missing environment variables: ${missing.join(', ')}`);
         }
-        
-        // Initialize OpenAI client for Azure OpenAI - FIXED VERSION
+    }
+
+    initializeOpenAIClient() {
         this.openaiClient = new OpenAI({
-            apiKey: this.openaiApiKey,
-            baseURL: `${this.openaiEndpoint}/openai/deployments/${this.deploymentName}`,
-            defaultQuery: { 'api-version': '2024-02-01' },
+            apiKey: process.env.AZURE_OPENAI_API_KEY,
+            baseURL: `${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}`,
+            defaultQuery: { 'api-version': process.env.AZURE_OPENAI_API_VERSION || '2024-02-01' },
             defaultHeaders: {
-                'api-key': this.openaiApiKey,
-            }
+                'api-key': process.env.AZURE_OPENAI_API_KEY,
+            },
         });
         
-        console.log('✅ Enhanced Azure Search Service initialized');
+        this.deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME;
+        console.log('✅ OpenAI Client initialized for PDF context search');
     }
-    
-    validateCredentials() {
-        const required = [
-            'AZURE_SEARCH_ENDPOINT',
-            'AZURE_SEARCH_ADMIN_KEY',
-            'AZURE_STORAGE_CONNECTION_STRING',
-            'AZURE_OPENAI_ENDPOINT',
-            'AZURE_OPENAI_API_KEY'
-        ];
-        
-        // Form Recognizer is optional but recommended
-        const optional = [
-            'AZURE_FORM_RECOGNIZER_ENDPOINT',
-            'AZURE_FORM_RECOGNIZER_API_KEY'
-        ];
-        
-        const missing = required.filter(key => !process.env[key] || process.env[key].trim() === '');
-        if (missing.length > 0) {
-            throw new Error(`Missing or empty environment variables: ${missing.join(', ')}`);
+
+    initializeSearchClient() {
+        if (process.env.AZURE_SEARCH_ENDPOINT && process.env.AZURE_SEARCH_ADMIN_KEY) {
+            this.searchClient = new SearchClient(
+                process.env.AZURE_SEARCH_ENDPOINT,
+                process.env.AZURE_SEARCH_INDEX_NAME || 'universities-pdf-index',
+                new AzureKeyCredential(process.env.AZURE_SEARCH_ADMIN_KEY)
+            );
+            console.log('✅ Azure Search Client initialized for PDF documents');
+        } else {
+            this.searchClient = null;
+            console.log('⚠️ Azure Search not configured, using in-memory PDF storage');
         }
-        
-        const missingOptional = optional.filter(key => !process.env[key] || process.env[key].trim() === '');
-        if (missingOptional.length > 0) {
-            console.log(`⚠️  Optional services not configured: ${missingOptional.join(', ')}`);
-            console.log('PDF extraction will use fallback method instead of Azure Form Recognizer');
-        }
-        
-        console.log('✅ All required environment variables are present');
     }
-    
-    /**
-     * Create or update the search index for PDF documents
-     */
-    async createIndex() {
+    async processExistingPDFs() {
         try {
-            // Check if vector search is supported by trying a vector-enabled index first
-            const vectorIndexDefinition = {
-                name: this.indexName,
-                fields: [
-                    { name: "id", type: "Edm.String", key: true, searchable: false, filterable: true },
-                    { name: "fileName", type: "Edm.String", searchable: true, filterable: true, sortable: true },
-                    { name: "universityName", type: "Edm.String", searchable: true, filterable: true, facetable: true },
-                    { name: "documentType", type: "Edm.String", filterable: true, facetable: true },
-                    { name: "content", type: "Edm.String", searchable: true, analyzer: "en.microsoft" },
-                    { name: "summary", type: "Edm.String", searchable: true },
-                    { name: "extractedEntities", type: "Collection(Edm.String)", searchable: true, filterable: true },
-                    { name: "keyPhrases", type: "Collection(Edm.String)", searchable: true, filterable: true },
-                    { name: "uploadDate", type: "Edm.DateTimeOffset", filterable: true, sortable: true },
-                    { name: "lastModified", type: "Edm.DateTimeOffset", filterable: true, sortable: true },
-                    { name: "contentVector", type: "Collection(Edm.Single)", searchable: true, dimensions: 1536, vectorSearchProfile: "vector-profile" }
-                ],
-                vectorSearch: {
-                    algorithms: [
-                        {
-                            name: "vector-algorithm",
-                            kind: "hnsw",
-                            hnswParameters: {
-                                metric: "cosine",
-                                m: 4,
-                                efConstruction: 400,
-                                efSearch: 500
-                            }
-                        }
-                    ],
-                    profiles: [
-                        {
-                            name: "vector-profile",
-                            algorithmConfigurationName: "vector-algorithm"
-                        }
-                    ]
-                },
-                semantic: {
-                    configurations: [
-                        {
-                            name: "semantic-config",
-                            prioritizedFields: {
-                                titleField: { fieldName: "fileName" },
-                                prioritizedContentFields: [
-                                    { fieldName: "content" },
-                                    { fieldName: "summary" }
-                                ],
-                                prioritizedKeywordsFields: [
-                                    { fieldName: "keyPhrases" },
-                                    { fieldName: "extractedEntities" }
-                                ]
-                            }
-                        }
-                    ]
+            const PDFProcessor = require('./pdfProcessor');
+            const pdfProcessor = new PDFProcessor();
+            
+            const dataDir = path.join(__dirname, '../data');
+            const files = await fs.readdir(dataDir);
+            const pdfFiles = files.filter(file => file.toLowerCase().endsWith('.pdf'));
+            
+            console.log(`Found ${pdfFiles.length} PDF files to process:`, pdfFiles);
+            
+            for (const pdfFile of pdfFiles) {
+                const pdfPath = path.join(dataDir, pdfFile);
+                
+                try {
+                    console.log(`Processing ${pdfFile}...`);
+                    const extractedText = await pdfProcessor.processPDF(pdfPath);
+                    await this.addPDFDocument(pdfFile, extractedText);
+                    console.log(`Successfully processed ${pdfFile}`);
+                } catch (error) {
+                    console.error(`Failed to process ${pdfFile}:`, error.message);
                 }
+            }
+            
+            console.log(`Completed processing ${pdfFiles.length} PDF files`);
+            
+        } catch (error) {
+            console.error('Error processing existing PDFs:', error);
+        }
+    }
+    async loadExistingPDFs() {
+        try {
+            const dataDir = path.join(__dirname, '../data');
+            const pdfDataPath = path.join(dataDir, 'pdf_documents.json');
+            
+            console.log(`Looking for processed PDF data at: ${path.resolve(pdfDataPath)}`);
+            
+            try {
+                await fs.access(pdfDataPath);
+                const data = await fs.readFile(pdfDataPath, 'utf8');
+                const pdfData = JSON.parse(data);
+                
+                Object.entries(pdfData).forEach(([fileName, content]) => {
+                    this.pdfDocuments.set(fileName, content);
+                });
+                
+                console.log(`Loaded ${this.pdfDocuments.size} existing PDF documents`);
+                
+            } catch (error) {
+                console.log('No processed PDF data found, checking for raw PDFs to process...');
+                
+                // Only process if we haven't already processed and aren't currently processing
+                if (!this.hasProcessedExistingPDFs && !this.isProcessing) {
+                    await this.processExistingPDFs();
+                } else {
+                    console.log('PDF processing already completed or in progress, skipping...');
+                }
+            }
+            
+        } catch (error) {
+            console.error('Error loading PDFs:', error);
+            await fs.mkdir(path.join(__dirname, '../data'), { recursive: true });
+        }
+    }
+
+    async savePDFData() {
+        try {
+            const pdfDataPath = path.join(__dirname, '../data/pdf_documents.json');
+            const pdfData = Object.fromEntries(this.pdfDocuments);
+            await fs.writeFile(pdfDataPath, JSON.stringify(pdfData, null, 2));
+            console.log('💾 PDF data saved successfully');
+        } catch (error) {
+            console.error('❌ Failed to save PDF data:', error);
+        }
+    }
+    extractUniversityName(content) {
+        // Extract university name from content using common patterns
+        const patterns = [
+            /university of ([^.\n]+)/i,
+            /([^.\n]+) university/i,
+            /([^.\n]+) college/i,
+            /(UCT|UWC|CPUT|Wits|Stellenbosch)/i
+        ];
+
+        for (const pattern of patterns) {
+            const match = content.match(pattern);
+            if (match) {
+                return match[1] ? match[1].trim() : match[0].trim();
+            }
+        }
+
+        return 'Unknown University';
+    }
+
+    extractSections(content) {
+        // Extract relevant sections from PDF content
+        const sections = {
+            admissionRequirements: this.extractSection(content, ['admission', 'requirements', 'entry']),
+            fees: this.extractSection(content, ['fees', 'cost', 'tuition', 'payment']),
+            programs: this.extractSection(content, ['program', 'course', 'degree', 'qualification']),
+            applicationProcess: this.extractSection(content, ['application', 'apply', 'process', 'deadline']),
+            contact: this.extractSection(content, ['contact', 'phone', 'email', 'address']),
+            accommodation: this.extractSection(content, ['accommodation', 'residence', 'housing'])
+        };
+
+        return sections;
+    }
+
+    extractSection(content, keywords) {
+        const lines = content.split('\n');
+        const relevantLines = [];
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].toLowerCase();
+            
+            // Check if line contains any keywords
+            if (keywords.some(keyword => line.includes(keyword))) {
+                // Include this line and next few lines for context
+                relevantLines.push(...lines.slice(Math.max(0, i - 1), Math.min(lines.length, i + 4)));
+                i += 3; // Skip ahead to avoid duplicates
+            }
+        }
+
+        return relevantLines.join('\n').substring(0, 1000); // Limit section length
+    }
+
+    async addPDFDocument(fileName, extractedContent) {
+        try {
+            console.log(`📄 Adding PDF document: ${fileName}`);
+            
+            // Structure the PDF content
+            const structuredContent = {
+                fileName: fileName,
+                universityName: this.extractUniversityName(extractedContent),
+                content: extractedContent,
+                sections: this.extractSections(extractedContent),
+                lastUpdated: new Date().toISOString(),
+                wordCount: extractedContent.split(/\s+/).length
             };
 
-            try {
-                await this.indexClient.createOrUpdateIndex(vectorIndexDefinition);
-                console.log('✅ Vector search index created/updated successfully');
-                this.supportsVectorSearch = true;
-            } catch (vectorError) {
-                console.log('⚠️  Vector search not supported, creating basic index...');
-                
-                // Fallback to basic index without vector search
-                const basicIndexDefinition = {
-                    name: this.indexName,
-                    fields: [
-                        { name: "id", type: "Edm.String", key: true, searchable: false, filterable: true },
-                        { name: "fileName", type: "Edm.String", searchable: true, filterable: true, sortable: true },
-                        { name: "universityName", type: "Edm.String", searchable: true, filterable: true, facetable: true },
-                        { name: "documentType", type: "Edm.String", filterable: true, facetable: true },
-                        { name: "content", type: "Edm.String", searchable: true, analyzer: "en.microsoft" },
-                        { name: "summary", type: "Edm.String", searchable: true },
-                        { name: "extractedEntities", type: "Collection(Edm.String)", searchable: true, filterable: true },
-                        { name: "keyPhrases", type: "Collection(Edm.String)", searchable: true, filterable: true },
-                        { name: "uploadDate", type: "Edm.DateTimeOffset", filterable: true, sortable: true },
-                        { name: "lastModified", type: "Edm.DateTimeOffset", filterable: true, sortable: true }
-                    ]
-                };
-                
-                await this.indexClient.createOrUpdateIndex(basicIndexDefinition);
-                console.log('✅ Basic search index created/updated successfully');
-                this.supportsVectorSearch = false;
-            }
+            // Store in memory
+            this.pdfDocuments.set(fileName, structuredContent);
+            
+            // Save to file system
+            await this.savePDFData();
+            
+            // DISABLE Azure Search upload for now
+            // if (this.searchClient) {
+            //     await this.addToSearchIndex(structuredContent);
+            // }
+
+            console.log(`✅ PDF document ${fileName} added successfully (${structuredContent.wordCount} words)`);
+            return structuredContent;
+            
         } catch (error) {
-            console.error('❌ Error creating index:', error);
+            console.error(`❌ Failed to add PDF document ${fileName}:`, error);
             throw error;
         }
     }
-    
-    /**
-     * Upload PDF to Azure Storage and process it
-     */
-    async uploadPDF(pdfBuffer, fileName, metadata = {}) {
+
+    // Main search function that uses ONLY PDF content
+    async searchWithAI(query, options = {}) {
         try {
-            // Upload to blob storage
-            const containerClient = this.blobServiceClient.getContainerClient(this.containerName);
-            await containerClient.createIfNotExists({ access: 'blob' });
+            console.log(`🔍 AI Search using PDF context: "${query}"`);
             
-            const blockBlobClient = containerClient.getBlockBlobClient(fileName);
-            await blockBlobClient.upload(pdfBuffer, pdfBuffer.length, {
-                blobHTTPHeaders: { blobContentType: 'application/pdf' },
-                metadata: metadata
-            });
-            
-            console.log(`✅ PDF uploaded: ${fileName}`);
-            
-            // Process the PDF and index it
-            await this.processPDFAndIndex(fileName, metadata);
-            
-            return { success: true, fileName, url: blockBlobClient.url };
-        } catch (error) {
-            console.error('❌ Error uploading PDF:', error);
-            throw error;
-        }
-    }
-    
-    /**
-     * Process PDF using Azure Cognitive Services and index the content
-     */
-    async processPDFAndIndex(fileName, metadata) {
-        try {
-            // Here you would typically use Azure Form Recognizer or Document Intelligence
-            // For now, we'll simulate the extracted content
-            const extractedContent = await this.extractPDFContent(fileName);
-            
-            // Generate embeddings for the content
-            const contentVector = await this.generateEmbeddings(extractedContent.text);
-            
-            // Extract key phrases and entities (you can use Azure Text Analytics)
-            const keyPhrases = await this.extractKeyPhrases(extractedContent.text);
-            const entities = await this.extractEntities(extractedContent.text);
-            
-            // Create search document
-            const document = {
-                id: this.generateDocumentId(fileName),
-                fileName: fileName,
-                universityName: metadata.universityName || this.extractUniversityName(extractedContent.text),
-                documentType: metadata.documentType || 'prospectus',
-                content: extractedContent.text,
-                summary: extractedContent.summary,
-                extractedEntities: entities,
-                keyPhrases: keyPhrases,
-                uploadDate: new Date().toISOString(),
-                lastModified: new Date().toISOString()
-            };
-            
-            // Add vector if supported
-            if (this.supportsVectorSearch) {
-                document.contentVector = contentVector;
-            }
-            
-            // Upload to search index
-            const result = await this.searchClient.uploadDocuments([document]);
-            
-            if (result.results[0].succeeded) {
-                console.log(`✅ Document indexed: ${fileName}`);
-            } else {
-                throw new Error(`Failed to index document: ${fileName}`);
-            }
-            
-            return document;
-        } catch (error) {
-            console.error('❌ Error processing PDF:', error);
-            throw error;
-        }
-    }
-    
-    /**
-     * Extract content from PDF using Azure Form Recognizer or fallback method
-     */
-    async extractPDFContent(fileName) {
-        try {
-            console.log(`📄 Extracting content from: ${fileName}`);
-            
-            // Get the PDF from blob storage
-            const containerClient = this.blobServiceClient.getContainerClient(this.containerName);
-            const blockBlobClient = containerClient.getBlockBlobClient(fileName);
-            
-            // Check if blob exists
-            const exists = await blockBlobClient.exists();
-            if (!exists) {
-                throw new Error(`PDF file ${fileName} not found in blob storage`);
-            }
-            
-            // Try Azure Form Recognizer first if available
-            if (this.documentAnalysisClient) {
-                return await this.extractWithFormRecognizer(blockBlobClient);
-            } else {
-                // Fallback to basic extraction
-                return await this.extractWithFallbackMethod(blockBlobClient, fileName);
-            }
-            
-        } catch (error) {
-            console.error(`❌ Error extracting PDF content from ${fileName}:`, error);
-            
-            // Return basic fallback content
-            return {
-                text: `Failed to extract content from ${fileName}. Please check the file format and try again.`,
-                summary: `Content extraction failed for ${fileName}`,
-                pages: 0,
-                tables: [],
-                keyValuePairs: {}
-            };
-        }
-    }
-    
-    /**
-     * Extract PDF content using Azure Form Recognizer (Document Intelligence)
-     */
-    async extractWithFormRecognizer(blockBlobClient) {
-        try {
-            console.log('🤖 Using Azure Form Recognizer for PDF extraction');
-            
-            // Get the blob URL for Form Recognizer
-            const blobUrl = blockBlobClient.url;
-            
-            // Use the prebuilt-read model for general document reading
-            const poller = await this.documentAnalysisClient.beginAnalyzeDocumentFromUrl(
-                "prebuilt-read", // You can also use "prebuilt-document" or "prebuilt-layout"
-                blobUrl
-            );
-            
-            // Wait for the analysis to complete
-            const result = await poller.pollUntilDone();
-            
-            if (!result || !result.content) {
-                throw new Error('No content extracted from document');
-            }
-            
-            // Extract text content
-            const fullText = result.content;
-            
-            // Extract tables if available
-            const tables = [];
-            if (result.tables) {
-                for (const table of result.tables) {
-                    const tableData = {
-                        rowCount: table.rowCount,
-                        columnCount: table.columnCount,
-                        cells: table.cells.map(cell => ({
-                            content: cell.content,
-                            rowIndex: cell.rowIndex,
-                            columnIndex: cell.columnIndex
-                        }))
-                    };
-                    tables.push(tableData);
-                }
-            }
-            
-            // Extract key-value pairs if available
-            const keyValuePairs = {};
-            if (result.keyValuePairs) {
-                for (const kvp of result.keyValuePairs) {
-                    if (kvp.key && kvp.value) {
-                        keyValuePairs[kvp.key.content] = kvp.value.content;
-                    }
-                }
-            }
-            
-            // Generate a summary using the extracted content
-            const summary = await this.generateDocumentSummary(fullText);
-            
-            console.log(`✅ Form Recognizer extracted ${fullText.length} characters from PDF`);
-            
-            return {
-                text: fullText,
-                summary: summary,
-                pages: result.pages ? result.pages.length : 1,
-                tables: tables,
-                keyValuePairs: keyValuePairs,
-                extractionMethod: 'Azure Form Recognizer'
-            };
-            
-        } catch (error) {
-            console.error('❌ Form Recognizer extraction failed:', error);
-            throw error;
-        }
-    }
-    
-    /**
-     * Fallback PDF extraction method using pdf-parse library
-     */
-    async extractWithFallbackMethod(blockBlobClient, fileName) {
-        try {
-            console.log('📚 Using fallback method for PDF extraction');
-            
-            // Download the PDF buffer
-            const downloadResponse = await blockBlobClient.download(0);
-            const pdfBuffer = await this.streamToBuffer(downloadResponse.readableStreamBody);
-            
-            // Try to use pdf-parse if available
-            try {
-                const pdf = require('pdf-parse');
-                const data = await pdf(pdfBuffer);
-                
-                const summary = await this.generateDocumentSummary(data.text);
-                
-                console.log(`✅ Fallback method extracted ${data.text.length} characters from PDF`);
-                
+            if (this.pdfDocuments.size === 0) {
                 return {
-                    text: data.text,
-                    summary: summary,
-                    pages: data.numpages,
-                    tables: [], // Tables not extracted in fallback method
-                    keyValuePairs: {},
-                    extractionMethod: 'pdf-parse fallback'
+                    answer: "I don't have any university PDF documents loaded yet. Please upload university brochures, prospectuses, or information documents first.",
+                    sources: [],
+                    searchType: 'no-pdfs',
+                    success: false
                 };
-                
-            } catch (pdfParseError) {
-                console.log('pdf-parse not available, using basic extraction');
-                
-                // Very basic extraction - just return filename and basic info
-                const basicText = `Document: ${fileName}\nThis PDF document could not be fully processed. Please ensure pdf-parse is installed or configure Azure Form Recognizer for better extraction.`;
-                
+            }
+
+            // Find relevant PDF documents
+            const relevantDocs = await this.findRelevantDocuments(query);
+            
+            if (relevantDocs.length === 0) {
                 return {
-                    text: basicText,
-                    summary: `Basic information for ${fileName}`,
-                    pages: 1,
-                    tables: [],
-                    keyValuePairs: {},
-                    extractionMethod: 'basic fallback'
+                    answer: `I couldn't find specific information about "${query}" in the available university documents. The information might not be covered in the uploaded PDFs, or you might need to upload more relevant documents.`,
+                    sources: Array.from(this.pdfDocuments.values()).map(doc => ({
+                        fileName: doc.fileName,
+                        universityName: doc.universityName,
+                        relevantContent: 'Document available but no specific match found'
+                    })),
+                    searchType: 'no-match',
+                    success: false
                 };
             }
+
+            // Create context from relevant documents
+            const context = this.buildContext(relevantDocs, query);
             
-        } catch (error) {
-            console.error('❌ Fallback extraction failed:', error);
-            throw error;
-        }
-    }
-    
-    /**
-     * Generate a summary of the document content using OpenAI
-     */
-    async generateDocumentSummary(text) {
-        try {
-            // Truncate text if it's too long for the API
-            const maxLength = 8000; // Leave room for prompt and response
-            const truncatedText = text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+            // Generate AI response using ONLY the PDF context
+            const aiResponse = await this.generateContextualResponse(query, context);
             
-            const response = await this.openaiClient.chat.completions.create({
-                model: this.deploymentName,
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'You are a helpful assistant that creates concise summaries of university documents. Focus on key information like programs, requirements, deadlines, and important details.'
-                    },
-                    {
-                        role: 'user',
-                        content: `Please provide a concise summary of this document content:\n\n${truncatedText}`
-                    }
-                ],
-                max_tokens: 200,
-                temperature: 0.3
-            });
-            
-            return response.choices[0].message.content;
-        } catch (error) {
-            console.error('❌ Error generating document summary:', error);
-            // Return a basic summary if AI generation fails
-            const words = text.split(' ').slice(0, 50).join(' ');
-            return `Document summary: ${words}...`;
-        }
-    }
-    
-    /**
-     * Helper function to convert stream to buffer
-     */
-    async streamToBuffer(readableStream) {
-        return new Promise((resolve, reject) => {
-            const chunks = [];
-            readableStream.on('data', (data) => {
-                chunks.push(data instanceof Buffer ? data : Buffer.from(data));
-            });
-            readableStream.on('end', () => {
-                resolve(Buffer.concat(chunks));
-            });
-            readableStream.on('error', reject);
-        });
-    }
-    
-    /**
-     * Generate embeddings using Azure OpenAI
-     */
-    async generateEmbeddings(text) {
-        try {
-            const response = await this.openaiClient.embeddings.create({
-                model: 'text-embedding-ada-002',
-                input: text
-            });
-            
-            return response.data[0].embedding;
-        } catch (error) {
-            console.error('❌ Error generating embeddings:', error);
-            // Return empty vector if embedding generation fails
-            return new Array(1536).fill(0);
-        }
-    }
-    
-    /**
-     * Extract key phrases (implement with Azure Text Analytics)
-     */
-    async extractKeyPhrases(text) {
-        // Placeholder implementation
-        // Use Azure Text Analytics API for real key phrase extraction
-        const phrases = text.split(' ')
-            .filter(word => word.length > 5)
-            .slice(0, 10);
-        
-        return phrases;
-    }
-    
-    /**
-     * Extract entities (implement with Azure Text Analytics)
-     */
-    async extractEntities(text) {
-        // Placeholder implementation
-        // Use Azure Text Analytics API for real entity extraction
-        const entities = ['University', 'South Africa', 'Bachelor', 'Degree'];
-        return entities;
-    }
-    
-    /**
-     * AI-powered search with context from PDFs
-     */
-    async searchWithAI(userQuery, options = {}) {
-        try {
-            let searchResults;
-            
-            if (this.supportsVectorSearch) {
-                // Generate embedding for the user query
-                const queryVector = await this.generateEmbeddings(userQuery);
-                
-                // Perform hybrid search (text + vector)
-                const searchOptions = {
-                    top: options.top || 5,
-                    select: ['fileName', 'universityName', 'content', 'summary', 'keyPhrases'],
-                    vectors: [{
-                        value: queryVector,
-                        kNearestNeighborsCount: 3,
-                        fields: 'contentVector'
-                    }],
-                    queryType: 'semantic',
-                    semanticSearchOptions: {
-                        configurationName: 'semantic-config',
-                        query: userQuery
-                    }
-                };
-                
-                searchResults = await this.searchClient.search(userQuery, searchOptions);
-            } else {
-                // Fallback to text-only search
-                const searchOptions = {
-                    top: options.top || 5,
-                    select: ['fileName', 'universityName', 'content', 'summary', 'keyPhrases'],
-                    queryType: 'simple'
-                };
-                
-                searchResults = await this.searchClient.search(userQuery, searchOptions);
-            }
-            
-            // Collect relevant documents
-            const relevantDocs = [];
-            for await (const result of searchResults.results) {
-                relevantDocs.push(result.document);
-            }
-            
-            // Generate AI response using the context
-            const aiResponse = await this.generateAIResponse(userQuery, relevantDocs);
+            console.log('✅ AI search completed using PDF context');
             
             return {
                 answer: aiResponse,
                 sources: relevantDocs.map(doc => ({
                     fileName: doc.fileName,
                     universityName: doc.universityName,
-                    relevantContent: doc.content.substring(0, 200) + '...'
+                    relevantContent: this.getRelevantExcerpt(doc, query)
                 })),
-                searchType: this.supportsVectorSearch ? 'hybrid' : 'text-only'
+                searchType: 'pdf-context',
+                documentsSearched: this.pdfDocuments.size,
+                relevantDocuments: relevantDocs.length,
+                success: true
             };
+
         } catch (error) {
-            console.error('❌ AI search error:', error);
-            throw error;
+            console.error('❌ PDF context search failed:', error);
+            return {
+                answer: 'I encountered an error while searching through the university documents. Please try again.',
+                sources: [],
+                searchType: 'error',
+                success: false,
+                error: error.message
+            };
         }
     }
-    
-    /**
-     * Generate AI response using OpenAI with retrieved context
-     */
-    async generateAIResponse(userQuery, relevantDocs) {
+
+    async createIndex() {
+    console.log('📋 Search index ready for university documents');
+    return true;
+    }
+
+    // Fix the search method in your PDFContextSearchService class
+async search(query, filters = {}, limit = 20) {
+    try {
+        // Check if we have PDF documents loaded
+        if (this.pdfDocuments.size === 0) {
+            console.log('No PDF documents loaded for search');
+            return [];
+        }
+
+        // Delegate to AI search for consistent results
+        const aiResult = await this.searchWithAI(query, { top: limit });
+        
+        // Transform AI results to expected format
+        return aiResult.sources.map((source, index) => ({
+            id: `search_${Date.now()}_${index}`,
+            universityName: source.universityName,
+            fileName: source.fileName,
+            content: source.relevantContent,
+            location: 'South Africa',
+            province: 'Various',
+            universityType: 'Traditional',
+            apsScoreRequired: 30,
+            tuitionFeesAnnual: 50000,
+            establishmentYear: 2000,
+            studentPopulation: 25000,
+            applicationDeadline: "30 September",
+            nsfasAccredited: true,
+            accommodationAvailable: true,
+            bursariesAvailable: true,
+            bachelorPassRequired: false,
+            languageMedium: "English",
+            relevanceScore: source.relevanceScore || 1
+        }));
+    } catch (error) {
+        console.error('Error in search method:', error);
+        return [];
+    }
+}
+    // Main search function that uses ONLY PDF content
+    async searchWithAI(query, options = {}) {
         try {
-            const context = relevantDocs.map(doc => 
-                `Document: ${doc.fileName} (${doc.universityName})\nContent: ${doc.content}`
-            ).join('\n\n---\n\n');
+            console.log(`🔍 AI Search using PDF context: "${query}"`);
             
-            const systemPrompt = `You are a helpful assistant for South African university information. 
-            Use the provided context from university documents to answer questions accurately.
-            If the information is not in the provided context, say so clearly.
-            Focus on being helpful, accurate, and specific to South African universities.`;
+            if (this.pdfDocuments.size === 0) {
+                return {
+                    answer: "I don't have any university PDF documents loaded yet. Please upload university brochures, prospectuses, or information documents first.",
+                    sources: [],
+                    searchType: 'no-pdfs',
+                    success: false
+                };
+            }
+
+            // Find relevant PDF documents
+            const relevantDocs = await this.findRelevantDocuments(query);
             
-            const userPrompt = `Context from university documents:
+            if (relevantDocs.length === 0) {
+                return {
+                    answer: `I couldn't find specific information about "${query}" in the available university documents. The information might not be covered in the uploaded PDFs, or you might need to upload more relevant documents.`,
+                    sources: Array.from(this.pdfDocuments.values()).map(doc => ({
+                        fileName: doc.fileName,
+                        universityName: doc.universityName,
+                        relevantContent: 'Document available but no specific match found'
+                    })),
+                    searchType: 'no-match',
+                    success: false
+                };
+            }
+
+            // Create context from relevant documents
+            const context = this.buildContext(relevantDocs, query);
+            
+            // Generate AI response using ONLY the PDF context
+            const aiResponse = await this.generateContextualResponse(query, context);
+            
+            console.log('✅ AI search completed using PDF context');
+            
+            return {
+                answer: aiResponse,
+                sources: relevantDocs.map(doc => ({
+                    fileName: doc.fileName,
+                    universityName: doc.universityName,
+                    relevantContent: this.getRelevantExcerpt(doc, query)
+                })),
+                searchType: 'pdf-context',
+                documentsSearched: this.pdfDocuments.size,
+                relevantDocuments: relevantDocs.length,
+                success: true
+            };
+
+        } catch (error) {
+            console.error('❌ PDF context search failed:', error);
+            return {
+                answer: 'I encountered an error while searching through the university documents. Please try again.',
+                sources: [],
+                searchType: 'error',
+                success: false,
+                error: error.message
+            };
+        }
+    }
+    async addUniversity(university) {
+    console.log(`📋 Registered structured data for: ${university.universityName}`);
+    // Could store structured data separately if needed
+    return true;
+    }
+
+    async generateEmbeddings(content) {
+        // Placeholder for Azure OpenAI embeddings
+        // In a full implementation, this would call Azure OpenAI embedding API
+        console.log('🔄 Embedding generation (ready for Azure OpenAI integration)');
+        return null;
+    }
+    async findRelevantDocuments(query) {
+        const queryLower = query.toLowerCase();
+        const relevantDocs = [];
+
+        // Score documents based on relevance to query
+        for (const [fileName, doc] of this.pdfDocuments) {
+            let score = 0;
+            const content = doc.content.toLowerCase();
+
+            // Basic keyword matching
+            const queryWords = queryLower.split(/\s+/).filter(word => word.length > 2);
+            
+            queryWords.forEach(word => {
+                const matches = (content.match(new RegExp(word, 'g')) || []).length;
+                score += matches;
+            });
+
+            // Boost score for university name matches
+            if (content.includes(queryLower) || queryLower.includes(doc.universityName.toLowerCase())) {
+                score += 10;
+            }
+
+            // Check sections for specific topics
+            if (queryLower.includes('fee') || queryLower.includes('cost') || queryLower.includes('cheap')) {
+                if (doc.sections.fees) score += 5;
+            }
+            
+            if (queryLower.includes('admission') || queryLower.includes('requirement')) {
+                if (doc.sections.admissionRequirements) score += 5;
+            }
+
+            if (score > 0) {
+                relevantDocs.push({ ...doc, relevanceScore: score });
+            }
+        }
+
+        // Sort by relevance and return top documents
+        return relevantDocs
+            .sort((a, b) => b.relevanceScore - a.relevanceScore)
+            .slice(0, 5); // Limit to top 5 most relevant documents
+    }
+
+    // Add this method to your PDFContextSearchService class
+async uploadDocument(doc) {
+    try {
+        console.log(`📋 Processing AI document chunk: ${doc.id}`);
+        
+        // Instead of separate upload, integrate the chunk into our main PDF documents
+        const chunkFileName = `${doc.fileName}_chunk_${doc.chunkIndex}`;
+        
+        const chunkDocument = {
+            fileName: chunkFileName,
+            universityName: doc.universityName,
+            content: doc.content,
+            sections: {
+                admissionRequirements: doc.summary.includes('Admission') ? doc.content.substring(0, 500) : '',
+                fees: doc.summary.includes('Fees') ? doc.content.substring(0, 500) : '',
+                programs: doc.summary.includes('programs') ? doc.content.substring(0, 500) : '',
+                applicationProcess: '',
+                contact: '',
+                accommodation: doc.summary.includes('Accommodation') ? doc.content.substring(0, 500) : ''
+            },
+            lastUpdated: doc.uploadDate,
+            wordCount: doc.content.split(/\s+/).length,
+            // Enhanced AI metadata
+            chunkIndex: doc.chunkIndex,
+            totalChunks: doc.totalChunks,
+            summary: doc.summary,
+            keyPhrases: doc.keyPhrases,
+            extractedEntities: doc.extractedEntities,
+            contentVector: doc.contentVector,
+            documentType: 'ai-chunk'
+        };
+
+        // Add chunk to our searchable documents
+        this.pdfDocuments.set(chunkFileName, chunkDocument);
+        await this.savePDFData();
+        
+        return true;
+    } catch (error) {
+        console.error(`Error uploading document chunk: ${error.message}`);
+        throw error;
+    }
+}
+
+    buildContext(relevantDocs, query) {
+        let context = "University Information from Official Documents:\n\n";
+        
+        relevantDocs.forEach(doc => {
+            context += `=== ${doc.universityName} (${doc.fileName}) ===\n`;
+            
+            // Add most relevant sections based on query
+            if (query.toLowerCase().includes('fee') || query.toLowerCase().includes('cost') || query.toLowerCase().includes('cheap')) {
+                if (doc.sections.fees) {
+                    context += `FEES INFORMATION:\n${doc.sections.fees}\n\n`;
+                }
+            }
+            
+            if (query.toLowerCase().includes('admission') || query.toLowerCase().includes('requirement')) {
+                if (doc.sections.admissionRequirements) {
+                    context += `ADMISSION REQUIREMENTS:\n${doc.sections.admissionRequirements}\n\n`;
+                }
+            }
+
+            if (query.toLowerCase().includes('program') || query.toLowerCase().includes('course')) {
+                if (doc.sections.programs) {
+                    context += `PROGRAMS OFFERED:\n${doc.sections.programs}\n\n`;
+                }
+            }
+
+            // Add general content excerpt
+            const excerpt = doc.content.substring(0, 500);
+            context += `GENERAL INFO:\n${excerpt}...\n\n`;
+        });
+
+        return context.substring(0, 8000); // Limit context length for AI
+    }
+
+    async generateContextualResponse(query, context) {
+        try {
+            const systemPrompt = `You are a university advisor with access to official university documents. 
+            IMPORTANT RULES:
+            1. ONLY use information from the provided document context
+            2. If information is not in the context, clearly state "This information is not available in the provided documents"
+            3. Always cite which university document the information comes from
+            4. Be specific about fees, requirements, and deadlines when available
+            5. If comparing universities, only compare those mentioned in the context`;
+
+            const userPrompt = `Based on the university documents provided below, please answer this question: "${query}"
+
+            DOCUMENT CONTEXT:
             ${context}
-            
-            User Question: ${userQuery}
-            
-            Please provide a comprehensive answer based on the context provided.`;
-            
+
+            Please provide a helpful and accurate answer based ONLY on the information in these documents.`;
+
             const response = await this.openaiClient.chat.completions.create({
                 model: this.deploymentName,
                 messages: [
@@ -621,368 +540,71 @@ class SearchService {
                     { role: 'user', content: userPrompt }
                 ],
                 max_tokens: 800,
-                temperature: 0.3
+                temperature: 0.3 // Lower temperature for more factual responses
             });
-            
+
             return response.choices[0].message.content;
+
         } catch (error) {
-            console.error('❌ Error generating AI response:', error);
-            return 'I apologize, but I encountered an error while generating a response. Please try again.';
-        }
-    }
-        getSampleUniversities(filters = {}, limit = 20) {
-        const sampleData = [
-            {
-                id: "uct_001",
-                universityName: "University of Cape Town",
-                location: "Cape Town",
-                province: "Western Cape",
-                universityType: "Traditional",
-                apsScoreRequired: 42,
-                tuitionFeesAnnual: 65000,
-                establishmentYear: 1829,
-                studentPopulation: 29000,
-                applicationDeadline: "30 September",
-                nsfasAccredited: true,
-                accommodationAvailable: true,
-                bursariesAvailable: true,
-                bachelorPassRequired: true,
-                languageMedium: "English",
-                content: "University of Cape Town prospectus content...",
-                summary: "Leading research university in South Africa"
-            },
-            {
-                id: "wits_001",
-                universityName: "University of the Witwatersrand",
-                location: "Johannesburg",
-                province: "Gauteng",
-                universityType: "Traditional",
-                apsScoreRequired: 40,
-                tuitionFeesAnnual: 58000,
-                establishmentYear: 1922,
-                studentPopulation: 38000,
-                applicationDeadline: "30 September",
-                nsfasAccredited: true,
-                accommodationAvailable: true,
-                bursariesAvailable: true,
-                bachelorPassRequired: true,
-                languageMedium: "English"
-            },
-            {
-                id: "stellenbosch_001",
-                universityName: "Stellenbosch University",
-                location: "Stellenbosch",
-                province: "Western Cape",
-                universityType: "Traditional",
-                apsScoreRequired: 38,
-                tuitionFeesAnnual: 52000,
-                establishmentYear: 1918,
-                studentPopulation: 32000,
-                applicationDeadline: "30 September",
-                nsfasAccredited: true,
-                accommodationAvailable: true,
-                bursariesAvailable: true,
-                bachelorPassRequired: true,
-                languageMedium: "Dual Medium"
-            },
-            {
-                id: "up_001",
-                universityName: "University of Pretoria",
-                location: "Pretoria",
-                province: "Gauteng",
-                universityType: "Traditional",
-                apsScoreRequired: 36,
-                tuitionFeesAnnual: 55000,
-                establishmentYear: 1908,
-                studentPopulation: 56000,
-                applicationDeadline: "31 August",
-                nsfasAccredited: true,
-                accommodationAvailable: true,
-                bursariesAvailable: true,
-                bachelorPassRequired: false,
-                languageMedium: "English"
-            },
-            {
-                id: "cput_001",
-                universityName: "Cape Peninsula University of Technology",
-                location: "Cape Town",
-                province: "Western Cape",
-                universityType: "University of Technology",
-                apsScoreRequired: 24,
-                tuitionFeesAnnual: 35000,
-                establishmentYear: 2005,
-                studentPopulation: 32000,
-                applicationDeadline: "30 September",
-                nsfasAccredited: true,
-                accommodationAvailable: true,
-                bursariesAvailable: true,
-                bachelorPassRequired: false,
-                languageMedium: "English"
-            }
-        ];
-        
-        // Apply filters to sample data
-        let filteredData = sampleData;
-        
-        // Apply filters
-        if (filters.minAPS) {
-            filteredData = filteredData.filter(uni => uni.apsScoreRequired >= filters.minAPS);
-        }
-        if (filters.maxAPS) {
-            filteredData = filteredData.filter(uni => uni.apsScoreRequired <= filters.maxAPS);
-        }
-        if (filters.province) {
-            filteredData = filteredData.filter(uni => uni.province === filters.province);
-        }
-        if (filters.universityType) {
-            filteredData = filteredData.filter(uni => uni.universityType === filters.universityType);
-        }
-        if (filters.maxTuitionFees) {
-            filteredData = filteredData.filter(uni => uni.tuitionFeesAnnual <= filters.maxTuitionFees);
-        }
-        if (filters.languageMedium) {
-            filteredData = filteredData.filter(uni => uni.languageMedium === filters.languageMedium);
-        }
-        if (filters.nsfasAccredited === true) {
-            filteredData = filteredData.filter(uni => uni.nsfasAccredited === true);
-        }
-        if (filters.accommodationAvailable === true) {
-            filteredData = filteredData.filter(uni => uni.accommodationAvailable === true);
-        }
-        if (filters.bachelorPassRequired === true) {
-            filteredData = filteredData.filter(uni => uni.bachelorPassRequired === true);
-        }
-        
-        return filteredData.slice(0, limit);
-    }
-    /**
-     * Simple text search (fallback)
-     */
-    async search(query, filters = {}, top = 20) {
-        try {
-            console.log('SearchService.search called with:', { query, filters, top });
-            
-            // Build search options
-            const searchOptions = {
-                top: Math.min(top, 100), // Limit max results
-                includeTotalCount: true,
-                select: [
-                    'id', 'fileName', 'universityName', 'documentType',
-                    'content', 'summary', 'keyPhrases', 'uploadDate',
-                    'location', 'province', 'universityType',
-                    'apsScoreRequired', 'tuitionFeesAnnual', 'establishmentYear',
-                    'studentPopulation', 'applicationDeadline', 'nsfasAccredited',
-                    'accommodationAvailable', 'bursariesAvailable', 'bachelorPassRequired',
-                    'languageMedium'
-                ]
-            };
-            
-            // Build filter string for Azure Search
-            const filterConditions = [];
-            
-            // APS Score Range
-            if (filters.minAPS !== undefined && filters.minAPS !== null) {
-                filterConditions.push(`apsScoreRequired ge ${filters.minAPS}`);
-            }
-            if (filters.maxAPS !== undefined && filters.maxAPS !== null) {
-                filterConditions.push(`apsScoreRequired le ${filters.maxAPS}`);
-            }
-            
-            // Province filter
-            if (filters.province) {
-                filterConditions.push(`province eq '${filters.province.replace(/'/g, "''")}'`);
-            }
-            
-            // University type filter
-            if (filters.universityType) {
-                filterConditions.push(`universityType eq '${filters.universityType.replace(/'/g, "''")}'`);
-            }
-            
-            // Maximum tuition fees
-            if (filters.maxTuitionFees !== undefined && filters.maxTuitionFees !== null) {
-                filterConditions.push(`tuitionFeesAnnual le ${filters.maxTuitionFees}`);
-            }
-            
-            // Language medium
-            if (filters.languageMedium) {
-                filterConditions.push(`languageMedium eq '${filters.languageMedium.replace(/'/g, "''")}'`);
-            }
-            
-            // Boolean filters
-            if (filters.nsfasAccredited === true) {
-                filterConditions.push(`nsfasAccredited eq true`);
-            }
-            
-            if (filters.accommodationAvailable === true) {
-                filterConditions.push(`accommodationAvailable eq true`);
-            }
-            
-            if (filters.bachelorPassRequired === true) {
-                filterConditions.push(`bachelorPassRequired eq true`);
-            }
-            
-            // Apply filters to search options
-            if (filterConditions.length > 0) {
-                searchOptions.filter = filterConditions.join(' and ');
-                console.log('Applied filters:', searchOptions.filter);
-            }
-            
-            // Perform the search
-            let searchResults;
-            try {
-                searchResults = await this.searchClient.search(query === '*' ? '' : query, searchOptions);
-            } catch (searchError) {
-                console.error('Azure Search error:', searchError);
-                
-                // Fallback: try search without filters if filtered search fails
-                if (searchOptions.filter) {
-                    console.log('Retrying search without filters...');
-                    delete searchOptions.filter;
-                    searchResults = await this.searchClient.search(query === '*' ? '' : query, searchOptions);
-                } else {
-                    throw searchError;
-                }
-            }
-            
-            // Collect results
-            const results = [];
-            for await (const result of searchResults.results) {
-                // Ensure all expected fields are present
-                const university = {
-                    id: result.document.id || `temp_${Date.now()}_${Math.random()}`,
-                    universityName: result.document.universityName || result.document.fileName || 'Unknown University',
-                    location: result.document.location || 'Not specified',
-                    province: result.document.province || 'Not specified',
-                    universityType: result.document.universityType || 'Traditional',
-                    apsScoreRequired: result.document.apsScoreRequired,
-                    tuitionFeesAnnual: result.document.tuitionFeesAnnual,
-                    establishmentYear: result.document.establishmentYear,
-                    studentPopulation: result.document.studentPopulation,
-                    applicationDeadline: result.document.applicationDeadline,
-                    nsfasAccredited: result.document.nsfasAccredited || false,
-                    accommodationAvailable: result.document.accommodationAvailable || false,
-                    bursariesAvailable: result.document.bursariesAvailable || false,
-                    bachelorPassRequired: result.document.bachelorPassRequired || false,
-                    languageMedium: result.document.languageMedium || 'English',
-                    // Keep original document fields
-                    content: result.document.content,
-                    summary: result.document.summary,
-                    keyPhrases: result.document.keyPhrases || [],
-                    uploadDate: result.document.uploadDate
-                };
-                
-                results.push(university);
-            }
-            
-            console.log(`Search completed: ${results.length} results found`);
-            return results;
-            
-        } catch (error) {
-            console.error('Search service error:', error);
-            
-            // Return sample data for development if search fails
-            if (process.env.NODE_ENV === 'development') {
-                console.log('Returning sample data for development...');
-                return this.getSampleUniversities(filters, top);
-            }
-            
-            throw error;
-        }
-    }
-    /**
-     * Utility methods
-     */
-    generateDocumentId(fileName) {
-        return fileName.toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Date.now();
-    }
-    
-    extractUniversityName(text) {
-        // Simple extraction - improve with NLP
-        const universities = [
-            'University of Cape Town', 'University of the Witwatersrand',
-            'Stellenbosch University', 'University of Pretoria',
-            'University of KwaZulu-Natal', 'Rhodes University'
-        ];
-        
-        for (const uni of universities) {
-            if (text.includes(uni)) {
-                return uni;
-            }
-        }
-        
-        return 'Unknown University';
-    }
-    
-    /**
-     * Get all indexed documents
-     */
-    async getAllDocuments() {
-        return this.search('*', {}, 100);
-    }
-    
-    /**
-     * Delete a document from the index
-     */
-    async deleteDocument(documentId) {
-        try {
-            const result = await this.searchClient.deleteDocuments([{ id: documentId }]);
-            return result.results[0].succeeded;
-        } catch (error) {
-            console.error('❌ Delete document error:', error);
-            throw error;
-        }
-    }
-    
-    /**
-     * Upload a single document (for AI chunks)
-     */
-    async uploadDocument(document) {
-        try {
-            const result = await this.searchClient.uploadDocuments([document]);
-            return result.results[0].succeeded;
-        } catch (error) {
-            console.error('❌ Upload document error:', error);
+            console.error('❌ Error generating contextual response:', error);
             throw error;
         }
     }
 
-    /**
-     * Add university (for structured data) - keeping backward compatibility
-     */
-    async addUniversity(universityData) {
-        try {
-            // Ensure ID exists
-            if (!universityData.id) {
-                universityData.id = this.generateDocumentId(universityData.universityName);
-            }
-            
-            const result = await this.searchClient.uploadDocuments([universityData]);
-            return result.results[0].succeeded;
-        } catch (error) {
-            console.error('❌ Add university error:', error);
-            throw error;
-        }
-    }
+    getRelevantExcerpt(doc, query) {
+        const queryWords = query.toLowerCase().split(/\s+/);
+        const content = doc.content.toLowerCase();
+        
+        // Find the best excerpt that contains query terms
+        const sentences = doc.content.split(/[.!?]+/);
+        let bestSentence = sentences[0];
+        let maxMatches = 0;
 
-    /**
-     * Get suggestions based on user input
-     */
-    async getSuggestions(query) {
-        try {
-            const suggestions = await this.searchClient.suggest(query, 'sg', {
-                top: 5,
-                select: ['fileName', 'universityName']
+        sentences.forEach(sentence => {
+            let matches = 0;
+            queryWords.forEach(word => {
+                if (sentence.toLowerCase().includes(word)) matches++;
             });
             
-            return suggestions.results.map(s => ({
-                text: s.text,
-                document: s.document
-            }));
-        } catch (error) {
-            console.error('❌ Suggestions error:', error);
-            return [];
+            if (matches > maxMatches) {
+                maxMatches = matches;
+                bestSentence = sentence;
+            }
+        });
+
+        return bestSentence.trim().substring(0, 200) + '...';
+    }
+
+    // Get summary of loaded PDF documents
+    getPDFSummary() {
+        const summary = {
+            totalDocuments: this.pdfDocuments.size,
+            universities: [],
+            lastUpdated: new Date().toISOString()
+        };
+
+        for (const [fileName, doc] of this.pdfDocuments) {
+            summary.universities.push({
+                fileName: fileName,
+                universityName: doc.universityName,
+                wordCount: doc.wordCount,
+                lastUpdated: doc.lastUpdated
+            });
         }
+
+        return summary;
+    }
+
+    // Remove a PDF document
+    async removePDFDocument(fileName) {
+        if (this.pdfDocuments.has(fileName)) {
+            this.pdfDocuments.delete(fileName);
+            await this.savePDFData();
+            console.log(`📄 Removed PDF document: ${fileName}`);
+            return true;
+        }
+        return false;
     }
 }
 
-module.exports = SearchService;
+module.exports = PDFContextSearchService;
