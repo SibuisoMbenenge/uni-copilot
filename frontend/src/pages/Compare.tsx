@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { ScaleIcon, PlusIcon, XMarkIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { getAllUniversities, compareUniversities } from '../services/api';
 import { 
@@ -11,15 +12,31 @@ import {
 
 const Compare: React.FC = () => {
   const [universities, setUniversities] = useState<University[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  //const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
   const [loadingState, setLoadingState] = useState<LoadingState>({ isLoading: false });
   const [errorState, setErrorState] = useState<ErrorState>({ hasError: false });
   const [universitiesLoading, setUniversitiesLoading] = useState(true);
 
+  const location = useLocation();
+
+  //Parse IDs from query string
+  const queryParams = new URLSearchParams(location.search);
+  const idsParam = queryParams.get("ids");
+  const initialSelectedIds = idsParam ? idsParam.split(",") : [];
+
+  const [selectedIds, setSelectedIds] = useState<string[]>(initialSelectedIds);
+
   useEffect(() => {
     loadUniversities();
   }, []);
+
+  //If the user navigates with new IDs, update selectedIds
+  useEffect(() => {
+    if(idsParam){
+      setSelectedIds(idsParam.split(","));
+    }
+  }, [idsParam]);
 
   const loadUniversities = async () => {
     try {
@@ -58,13 +75,14 @@ const Compare: React.FC = () => {
     
     try {
       const response = await compareUniversities(selectedIds);
+      console.log('Comparison response:', response);
       
       if (response.success && response.data) {
         setComparisonResult({
-          summary: response.data.summary,
-          highlights: response.data.highlights,
-          universities: response.data.universities,
-          comparison: response.data.comparison
+          summary: response.data.comparison.summary,
+          highlights: response.data.comparison.highlights,
+          universities: response.data.comparison.universities,
+          comparison: response.data.comparison.analysis
         });
       } else {
         throw new Error(response.message || 'Failed to compare universities');

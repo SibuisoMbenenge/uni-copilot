@@ -273,6 +273,9 @@ export interface University {
   location: string;
   province: string;
   city?: string;
+  //Added lines:
+  studentCount?: number;
+  tuition?: number;
   applicationDeadline?: string;
   apsScoreRequired?: number;
   matricRequirements?: string;

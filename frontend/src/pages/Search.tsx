@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   MagnifyingGlassIcon, 
   FunnelIcon, 
@@ -78,6 +79,8 @@ const Search: React.FC = () => {
     error: null,
     pagination: null
   });
+
+  const navigate = useNavigate();
 
   const [filters, setFilters] = useState<SASearchFilters>(INITIAL_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
@@ -469,7 +472,10 @@ const Search: React.FC = () => {
               <button
                 className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                 onClick={() => {
-                  console.log('Compare universities:', comparisonList);
+                  //console.log('Compare universities:', comparisonList);
+                  //Navigate to Compare page with selected university IDs
+                  const ids = comparisonList.map(u => u.id).join(',');
+                  navigate(`/compare?ids=${encodeURIComponent(ids)}`);
                 }}
               >
                 Compare Now

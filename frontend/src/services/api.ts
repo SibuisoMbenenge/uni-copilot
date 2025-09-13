@@ -165,7 +165,19 @@ export const getAllUniversities = async (
     const response = await api.get('/api/universities', {
       params: { page, limit }
     });
-    return response.data;
+    //return response.data;
+
+    // Fix: Handle the actual response structure
+    if (response.data.success) {
+      return {
+        success: true,
+        data: response.data.universities, // Your backend returns 'universities', not 'data'
+        pagination: response.data.pagination
+      };
+    } else {
+      throw new Error(response.data.error || 'Failed to fetch universities');
+    }
+
   } catch (error: any) {
     throw new Error(error.response?.data?.message || 'Failed to fetch universities');
   }
@@ -197,9 +209,15 @@ export const compareUniversities = async (
     if (universityIds.length > 4) throw new Error('Cannot compare more than 4 universities');
     
     const response = await api.post('/api/compare', { universityIds });
-    return response.data;
+    //return response.data;
+    return {
+      success: response.data.success,
+      data: response.data.comparison,
+      message: "Comparison completed successfully"
+    }
   } catch (error: any) {
     throw new Error(error.response?.data?.message || 'Failed to compare universities');
+    //console.log(error.response);
   }
 };
 

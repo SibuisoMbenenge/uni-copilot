@@ -109,7 +109,8 @@ const Dashboard: React.FC = () => {
         // Parse deadline - assume current year if year not specified
         let deadlineDate: Date;
         try {
-          deadlineDate = new Date(u.deadline);
+          //deadlineDate = new Date(u.deadline);
+          deadlineDate = new Date(u.deadline ?? "");
           // If year is not in the future, assume next year
           if (deadlineDate.getFullYear() < currentYear || 
               (deadlineDate.getFullYear() === currentYear && deadlineDate < now)) {
