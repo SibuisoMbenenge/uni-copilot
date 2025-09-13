@@ -1,3 +1,4 @@
+// Updated Search component with AI chat functionality
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   MagnifyingGlassIcon, 
@@ -5,7 +6,6 @@ import {
   XMarkIcon,
   AdjustmentsHorizontalIcon,
   BookmarkIcon,
-  EyeIcon,
   ScaleIcon,
   StarIcon,
   MapPinIcon,
@@ -14,11 +14,24 @@ import {
   AcademicCapIcon,
   BuildingOfficeIcon,
   CheckBadgeIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  ChatBubbleLeftRightIcon,
+  SparklesIcon
 } from '@heroicons/react/24/outline';
 import { BookmarkIcon as BookmarkSolidIcon } from '@heroicons/react/24/solid';
-import { searchUniversities, getAllUniversities } from '../services/api';
+import { searchUniversities, askAIQuestion } from '../services/api';
 import { University, SearchFilters, PaginatedResponse, SAUniversityCardProps, SearchState, SASearchFilters } from '../types';
+
+// Add AI Chat interface
+interface AIResponse {
+  answer: string;
+  sources: Array<{
+    fileName: string;
+    universityName: string;
+    relevantContent: string;
+  }>;
+  searchType: string;
+}
 
 const INITIAL_FILTERS: SASearchFilters = {
   minAPS: undefined,
@@ -35,30 +48,22 @@ const INITIAL_FILTERS: SASearchFilters = {
 };
 
 const SA_PROVINCES = [
-  'Eastern Cape',
-  'Free State', 
-  'Gauteng',
-  'KwaZulu-Natal',
-  'Limpopo',
-  'Mpumalanga',
-  'Northern Cape',
-  'North West',
-  'Western Cape'
+  'Eastern Cape', 'Free State', 'Gauteng', 'KwaZulu-Natal',
+  'Limpopo', 'Mpumalanga', 'Northern Cape', 'North West', 'Western Cape'
 ];
 
-const UNIVERSITY_TYPES = [
-  'Traditional',
-  'University of Technology', 
-  'Comprehensive'
+const UNIVERSITY_TYPES = ['Traditional', 'University of Technology', 'Comprehensive'];
+const LANGUAGE_MEDIUMS = ['English', 'Afrikaans', 'Dual Medium'];
+
+// Sample questions for AI search
+const SAMPLE_AI_QUESTIONS = [
+  "What are the best universities for engineering in South Africa?",
+  "Which universities offer medicine programs?",
+  "What are the cheapest universities in Western Cape?",
+  "Which universities have the lowest APS requirements?",
+  "Tell me about universities with accommodation in Johannesburg"
 ];
 
-const LANGUAGE_MEDIUMS = [
-  'English',
-  'Afrikaans',
-  'Dual Medium'
-];
-
-// Debounce utility
 function debounce<T extends (...args: any[]) => void>(
   func: T,
   wait: number
@@ -85,8 +90,29 @@ const Search: React.FC = () => {
   const [comparisonList, setComparisonList] = useState<University[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [isFirstLoad, setIsFirstLoad] = useState(true);
+  
+  // AI Chat state
+  const [showAIChat, setShowAIChat] = useState(false);
+  const [aiResponse, setAiResponse] = useState<AIResponse | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
-  // Debounced search function
+  // Detect if query is natural language vs simple search
+  const isNaturalLanguageQuery = (query: string) => {
+    if (!query || query === '*') return false;
+    
+    const naturalLanguageIndicators = [
+      'what', 'which', 'how', 'where', 'when', 'why', 'who',
+      'best', 'cheapest', 'most', 'least', 'tell me', 'show me',
+      'find', 'looking for', 'need', 'want', 'recommend'
+    ];
+    
+    const lowerQuery = query.toLowerCase();
+    return naturalLanguageIndicators.some(indicator => 
+      lowerQuery.includes(indicator)
+    ) || query.split(' ').length > 3;
+  };
+
   const debouncedSearch = useCallback(
     debounce(async (searchQuery: string, searchFilters: SASearchFilters, page: number = 1) => {
       console.log('Debounced search triggered:', { searchQuery, searchFilters, page });
@@ -111,8 +137,21 @@ const Search: React.FC = () => {
             error: null,
             pagination: response.pagination || null
           }));
+          
+          // Show AI answer if available
+          if ((response as any).aiAnswer) {
+            setAiResponse({
+              answer: (response as any).aiAnswer,
+              sources: response.data?.map((uni: University) => ({
+                fileName: uni.universityName,
+                universityName: uni.universityName,
+                relevantContent: uni.summary || uni.content || `Information about ${uni.universityName}`
+              })) || [],
+              searchType: 'ai-enhanced'
+            });
+            setShowAIChat(true);
+          }
         } else {
-          // Handle unsuccessful response
           setSearchState(prev => ({
             ...prev,
             results: [],
@@ -131,12 +170,44 @@ const Search: React.FC = () => {
           pagination: null
         }));
       }
-    }, 500), // Increased debounce time to reduce server load
+    }, 500),
     []
   );
 
+  const handleAIQuestion = async (question: string) => {
+    if (!question.trim()) return;
+    
+    setAiLoading(true);
+    setAiError(null);
+    
+    try {
+      const response = await askAIQuestion(question);
+      
+      if (response.success) {
+        if (response.data) {
+          setAiResponse(response.data);
+          setShowAIChat(true);
+        } else {
+          setAiResponse(null);
+        }
+      } else {
+        setAiError(response.error || 'Failed to get AI response');
+      }
+    } catch (error: any) {
+      setAiError(error.message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const handleSearch = useCallback((page: number = 1) => {
     console.log('Search initiated:', { query: searchState.query, filters, page });
+    
+    // If it's a natural language query, also trigger AI search
+    if (isNaturalLanguageQuery(searchState.query)) {
+      handleAIQuestion(searchState.query);
+    }
+    
     debouncedSearch(searchState.query, filters, page);
   }, [searchState.query, filters, debouncedSearch]);
 
@@ -145,12 +216,10 @@ const Search: React.FC = () => {
   };
 
   const handleFilterChange = <K extends keyof SASearchFilters>(key: K, value: SASearchFilters[K]) => {
-    console.log('Filter changed:', key, value);
     setFilters(prev => ({ ...prev, [key]: value }));
   };
 
   const clearFilters = () => {
-    console.log('Clearing all filters');
     setFilters(INITIAL_FILTERS);
   };
 
@@ -181,53 +250,7 @@ const Search: React.FC = () => {
     setComparisonList(prev => prev.filter(u => u.id !== universityId));
   };
 
-  // Sort results based on current sort settings
-  const sortedResults = useMemo(() => {
-    if (!searchState.results.length) return [];
-    
-    return [...searchState.results].sort((a, b) => {
-      let aVal: any, bVal: any;
-      
-      switch (filters.sortBy) {
-        case 'universityName':
-          aVal = (a.universityName || '').toLowerCase();
-          bVal = (b.universityName || '').toLowerCase();
-          break;
-        case 'apsScoreRequired':
-          aVal = a.apsScoreRequired || 0;
-          bVal = b.apsScoreRequired || 0;
-          break;
-        case 'tuitionFeesAnnual':
-          aVal = a.tuitionFeesAnnual || 0;
-          bVal = b.tuitionFeesAnnual || 0;
-          break;
-        case 'establishmentYear':
-          aVal = a.establishmentYear || 0;
-          bVal = b.establishmentYear || 0;
-          break;
-        default:
-          return 0;
-      }
-      
-      if (filters.sortOrder === 'desc') {
-        return aVal > bVal ? -1 : aVal < bVal ? 1 : 0;
-      } else {
-        return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
-      }
-    });
-  }, [searchState.results, filters.sortBy, filters.sortOrder]);
-
-  const handlePageChange = (page: number) => {
-    handleSearch(page);
-  };
-
-  const retrySearch = () => {
-    console.log('Retrying search...');
-    setSearchState(prev => ({ ...prev, error: null }));
-    handleSearch();
-  };
-
-  // Initial load - only search when the component mounts
+  // Initial load
   useEffect(() => {
     if (isFirstLoad) {
       console.log('Initial load - performing first search');
@@ -236,7 +259,7 @@ const Search: React.FC = () => {
     }
   }, [isFirstLoad, handleSearch]);
 
-  // Auto-search when filters change (but not on initial load)
+  // Auto-search when filters change
   useEffect(() => {
     if (!isFirstLoad) {
       console.log('Filters changed - performing search');
@@ -244,8 +267,124 @@ const Search: React.FC = () => {
     }
   }, [filters, isFirstLoad]);
 
+  function retrySearch(event: React.MouseEvent<HTMLButtonElement>): void {
+    throw new Error('Function not implemented.');
+  }
+
+  function handlePageChange(arg0: number): void {
+    throw new Error('Function not implemented.');
+  }
+
   return (
     <div className="space-y-6">
+      {/* AI Assistant Banner */}
+      <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <SparklesIcon className="h-6 w-6 text-purple-600" />
+            <div>
+              <h3 className="font-medium text-purple-900">AI-Powered University Search</h3>
+              <p className="text-sm text-purple-700">
+                Ask natural language questions like "What are the best engineering universities?" or use traditional search
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowAIChat(!showAIChat)}
+            className="flex items-center space-x-2 px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+          >
+            <ChatBubbleLeftRightIcon className="h-4 w-4" />
+            <span>AI Chat</span>
+          </button>
+        </div>
+        
+        {/* Sample Questions */}
+        <div className="mt-3 flex flex-wrap gap-2">
+          {SAMPLE_AI_QUESTIONS.slice(0, 3).map((question, idx) => (
+            <button
+              key={idx}
+              onClick={() => {
+                setSearchState(prev => ({ ...prev, query: question }));
+                handleAIQuestion(question);
+              }}
+              className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 transition-colors"
+            >
+              {question}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* AI Chat Panel */}
+      {showAIChat && (
+        <div className="bg-white rounded-lg shadow-lg border">
+          <div className="p-4 border-b bg-gradient-to-r from-purple-50 to-blue-50">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <SparklesIcon className="h-5 w-5 text-purple-600" />
+                <h3 className="font-semibold text-gray-900">AI University Assistant</h3>
+              </div>
+              <button
+                onClick={() => setShowAIChat(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XMarkIcon className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+          
+          <div className="p-6">
+            {aiLoading ? (
+              <div className="flex items-center space-x-3">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
+                <span className="text-gray-600">AI is thinking...</span>
+              </div>
+            ) : aiError ? (
+              <div className="text-red-600 bg-red-50 p-3 rounded-lg">
+                <p className="font-medium">AI Error:</p>
+                <p>{aiError}</p>
+              </div>
+            ) : aiResponse ? (
+              <div className="space-y-4">
+                <div className="bg-purple-50 p-4 rounded-lg">
+                  <h4 className="font-medium text-purple-900 mb-2">AI Response:</h4>
+                  <p className="text-gray-700 whitespace-pre-wrap">{aiResponse.answer}</p>
+                </div>
+                
+                {aiResponse.sources.length > 0 && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Sources:</h4>
+                    <div className="space-y-2">
+                      {aiResponse.sources.map((source, idx) => (
+                        <div key={idx} className="border rounded-lg p-3 bg-gray-50">
+                          <h5 className="font-medium text-gray-900">{source.universityName}</h5>
+                          <p className="text-sm text-gray-600 mt-1">{source.relevantContent}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <SparklesIcon className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                <p className="text-gray-500">Ask a question about South African universities!</p>
+                <div className="mt-4 space-y-2">
+                  {SAMPLE_AI_QUESTIONS.map((question, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleAIQuestion(question)}
+                      className="block w-full text-left px-3 py-2 text-sm bg-gray-50 hover:bg-gray-100 rounded transition-colors"
+                    >
+                      {question}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {/* Search Header */}
       <div className="bg-white rounded-lg shadow p-6">
         <div className="flex justify-between items-center mb-4">
@@ -559,67 +698,107 @@ const Search: React.FC = () => {
                 </button>
               </div>
             </div>
-          ) : sortedResults.length > 0 ? (
-            <>
-              <div className={viewMode === 'grid' ? 'grid grid-cols-1 lg:grid-cols-2 gap-6' : 'space-y-4'}>
-                {sortedResults.map((university) => (
-                  <SAUniversityCard
-                    key={university.id}
-                    university={university}
-                    isSaved={savedUniversities.has(university.id)}
-                    onSave={toggleSave}
-                    onCompare={addToComparison}
-                    isInComparison={comparisonList.some(u => u.id === university.id)}
-                    viewMode={viewMode}
-                  />
-                ))}
-              </div>
-              
-              {/* Pagination */}
-              {searchState.pagination && searchState.pagination.totalPages > 1 && (
-                <div className="mt-8 flex justify-center">
-                  <div className="flex space-x-1">
-                    {searchState.pagination.hasPrev && (
-                      <button
-                        onClick={() => handlePageChange(searchState.pagination!.page - 1)}
-                        className="px-3 py-2 border border-gray-300 rounded hover:bg-gray-50"
-                      >
-                        Previous
-                      </button>
-                    )}
-                    
-                    {Array.from({ length: Math.min(5, searchState.pagination.totalPages) }, (_, i) => {
-                      const pageNum = Math.max(1, searchState.pagination!.page - 2 + i);
-                      if (pageNum > searchState.pagination!.totalPages) return null;
-                      
-                      return (
-                        <button
-                          key={pageNum}
-                          onClick={() => handlePageChange(pageNum)}
-                          className={`px-3 py-2 border rounded ${
-                            pageNum === searchState.pagination!.page
-                              ? 'bg-blue-600 text-white border-blue-600'
-                              : 'border-gray-300 hover:bg-gray-50'
-                          }`}
-                        >
-                          {pageNum}
-                        </button>
-                      );
-                    })}
-                    
-                    {searchState.pagination.hasNext && (
-                      <button
-                        onClick={() => handlePageChange(searchState.pagination!.page + 1)}
-                        className="px-3 py-2 border border-gray-300 rounded hover:bg-gray-50"
-                      >
-                        Next
-                      </button>
-                    )}
-                  </div>
+          ) : (() => {
+            // Sort results according to filters.sortBy and filters.sortOrder
+            const sortedResults = [...(searchState.results || [])].sort((a, b) => {
+              const { sortBy, sortOrder } = filters;
+              let aValue = (a as any)[sortBy!];
+              let bValue = (b as any)[sortBy!];
+
+              // Handle undefined/null values
+              if (aValue == null) aValue = '';
+              if (bValue == null) bValue = '';
+
+              // Numeric sort if both are numbers
+              if (typeof aValue === 'number' && typeof bValue === 'number') {
+                return sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+              }
+              // String sort
+              return sortOrder === 'asc'
+                ? String(aValue).localeCompare(String(bValue))
+                : String(bValue).localeCompare(String(aValue));
+            });
+
+            return sortedResults.length > 0 ? (
+              <>
+                <div className={viewMode === 'grid' ? 'grid grid-cols-1 lg:grid-cols-2 gap-6' : 'space-y-4'}>
+                  {sortedResults.map((university) => (
+                    <SAUniversityCard
+                      key={university.id}
+                      university={university}
+                      isSaved={savedUniversities.has(university.id)}
+                      onSave={toggleSave}
+                      onCompare={addToComparison}
+                      isInComparison={comparisonList.some(u => u.id === university.id)}
+                      viewMode={viewMode}
+                    />
+                  ))}
                 </div>
-              )}
-            </>
-          ) : (
+                
+                {/* Pagination */}
+                {searchState.pagination && searchState.pagination.totalPages > 1 && (
+                  <div className="mt-8 flex justify-center">
+                    <div className="flex space-x-1">
+                      {searchState.pagination.hasPrev && (
+                        <button
+                          onClick={() => handlePageChange(searchState.pagination!.page - 1)}
+                          className="px-3 py-2 border border-gray-300 rounded hover:bg-gray-50"
+                        >
+                          Previous
+                        </button>
+                      )}
+                      
+                      {Array.from({ length: Math.min(5, searchState.pagination.totalPages) }, (_, i) => {
+                        const pageNum = Math.max(1, searchState.pagination!.page - 2 + i);
+                        if (pageNum > searchState.pagination!.totalPages) return null;
+                        
+                        function handlePageChange(pageNum: number): void {
+                          throw new Error('Function not implemented.');
+                        }
+
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => handlePageChange(pageNum)}
+                            className={`px-3 py-2 border rounded ${
+                              pageNum === searchState.pagination!.page
+                                ? 'bg-blue-600 text-white border-blue-600'
+                                : 'border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                      
+                      {searchState.pagination.hasNext && (
+                        <button
+                          onClick={() => handlePageChange(searchState.pagination!.page + 1)}
+                          className="px-3 py-2 border border-gray-300 rounded hover:bg-gray-50"
+                        >
+                          Next
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-center py-12">
+                <MagnifyingGlassIcon className="mx-auto h-12 w-12 text-gray-400" />
+                <h3 className="mt-2 text-sm font-medium text-gray-900">No universities found</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Try adjusting your search query or filters.
+                </p>
+                <button 
+                  onClick={clearFilters}
+                  className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Clear All Filters
+                </button>
+              </div>
+            );
+          })()}
             <div className="text-center py-12">
               <MagnifyingGlassIcon className="mx-auto h-12 w-12 text-gray-400" />
               <h3 className="mt-2 text-sm font-medium text-gray-900">No universities found</h3>
@@ -633,7 +812,6 @@ const Search: React.FC = () => {
                 Clear All Filters
               </button>
             </div>
-          )}
         </div>
       </div>
     </div>
