@@ -11,44 +11,64 @@ import {
   MapPinIcon,
   CalendarIcon,
   CurrencyDollarIcon,
-  AcademicCapIcon
+  AcademicCapIcon,
+  BuildingOfficeIcon,
+  CheckBadgeIcon,
+  ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import { BookmarkIcon as BookmarkSolidIcon } from '@heroicons/react/24/solid';
 import { searchUniversities, getAllUniversities } from '../services/api';
-import { University, SearchFilters, PaginatedResponse } from '../types';
+import { University, SearchFilters, PaginatedResponse, SAUniversityCardProps, SearchState, SASearchFilters } from '../types';
 
-interface SearchState {
-  query: string;
-  results: University[];
-  loading: boolean;
-  error: string | null;
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-    hasNext: boolean;
-    hasPrev: boolean;
-  } | null;
-}
-
-interface FiltersState extends SearchFilters {
-  sortBy: 'ranking' | 'acceptanceRate' | 'gpaRequired' | 'tuition' | 'name';
-  sortOrder: 'asc' | 'desc';
-}
-
-const INITIAL_FILTERS: FiltersState = {
-  minGPA: undefined,
-  maxGPA: undefined,
-  minSAT: undefined,
-  maxSAT: undefined,
-  maxAcceptanceRate: undefined,
-  location: undefined,
-  maxEssays: undefined,
-  maxTuition: undefined,
-  sortBy: 'ranking',
+const INITIAL_FILTERS: SASearchFilters = {
+  minAPS: undefined,
+  maxAPS: undefined,
+  province: undefined,
+  universityType: undefined,
+  maxTuitionFees: undefined,
+  nsfasAccredited: undefined,
+  bachelorPassRequired: undefined,
+  languageMedium: undefined,
+  accommodationAvailable: undefined,
+  sortBy: 'universityName',
   sortOrder: 'asc'
 };
+
+const SA_PROVINCES = [
+  'Eastern Cape',
+  'Free State', 
+  'Gauteng',
+  'KwaZulu-Natal',
+  'Limpopo',
+  'Mpumalanga',
+  'Northern Cape',
+  'North West',
+  'Western Cape'
+];
+
+const UNIVERSITY_TYPES = [
+  'Traditional',
+  'University of Technology', 
+  'Comprehensive'
+];
+
+const LANGUAGE_MEDIUMS = [
+  'English',
+  'Afrikaans',
+  'Dual Medium'
+];
+
+// Debounce utility
+function debounce<T extends (...args: any[]) => void>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeout: NodeJS.Timeout;
+  return (...args: Parameters<T>) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  };
+}
 
 const Search: React.FC = () => {
   const [searchState, setSearchState] = useState<SearchState>({
@@ -59,69 +79,78 @@ const Search: React.FC = () => {
     pagination: null
   });
 
-  const [filters, setFilters] = useState<FiltersState>(INITIAL_FILTERS);
+  const [filters, setFilters] = useState<SASearchFilters>(INITIAL_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
   const [savedUniversities, setSavedUniversities] = useState<Set<string>>(new Set());
   const [comparisonList, setComparisonList] = useState<University[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
+  const [isFirstLoad, setIsFirstLoad] = useState(true);
 
   // Debounced search function
   const debouncedSearch = useCallback(
-    debounce(async (searchQuery: string, searchFilters: SearchFilters, page: number = 1) => {
+    debounce(async (searchQuery: string, searchFilters: SASearchFilters, page: number = 1) => {
+      console.log('Debounced search triggered:', { searchQuery, searchFilters, page });
+      
       setSearchState(prev => ({ ...prev, loading: true, error: null }));
       
       try {
-        let response: PaginatedResponse<University[]>;
-        
-        if (searchQuery.trim() || Object.values(searchFilters).some(v => v !== undefined && v !== '')) {
-          // Clean filters - remove empty values
-          const cleanFilters = Object.entries(searchFilters).reduce((acc, [key, value]) => {
-            if (value !== undefined && value !== '' && value !== null) {
-              acc[key as keyof SearchFilters] = value;
-            }
-            return acc;
-          }, {} as SearchFilters);
+        const response = await searchUniversities(
+          searchQuery || '*', 
+          searchFilters, 
+          page, 
+          20
+        );
 
-          response = await searchUniversities(searchQuery || '*', cleanFilters, page, 20);
-        } else {
-          response = await getAllUniversities(page, 20);
-        }
+        console.log('Search response received:', response);
 
-        if (response.success && response.data) {
+        if (response.success) {
           setSearchState(prev => ({
             ...prev,
             results: response.data || [],
             loading: false,
+            error: null,
             pagination: response.pagination || null
           }));
         } else {
-          throw new Error(response.message || 'Search failed');
+          // Handle unsuccessful response
+          setSearchState(prev => ({
+            ...prev,
+            results: [],
+            loading: false,
+            error: response.error || 'Search failed',
+            pagination: null
+          }));
         }
       } catch (error: any) {
+        console.error('Search error in component:', error);
         setSearchState(prev => ({
           ...prev,
           loading: false,
-          error: error.message || 'An error occurred during search'
+          error: error.message || 'An error occurred during search',
+          results: [],
+          pagination: null
         }));
       }
-    }, 300),
+    }, 500), // Increased debounce time to reduce server load
     []
   );
 
   const handleSearch = useCallback((page: number = 1) => {
-    const { sortBy, sortOrder, ...searchFilters } = filters;
-    debouncedSearch(searchState.query, searchFilters, page);
+    console.log('Search initiated:', { query: searchState.query, filters, page });
+    debouncedSearch(searchState.query, filters, page);
   }, [searchState.query, filters, debouncedSearch]);
 
   const handleQueryChange = (value: string) => {
     setSearchState(prev => ({ ...prev, query: value }));
   };
 
-  const handleFilterChange = <K extends keyof FiltersState>(key: K, value: FiltersState[K]) => {
+  const handleFilterChange = <K extends keyof SASearchFilters>(key: K, value: SASearchFilters[K]) => {
+    console.log('Filter changed:', key, value);
     setFilters(prev => ({ ...prev, [key]: value }));
   };
 
   const clearFilters = () => {
+    console.log('Clearing all filters');
     setFilters(INITIAL_FILTERS);
   };
 
@@ -160,34 +189,30 @@ const Search: React.FC = () => {
       let aVal: any, bVal: any;
       
       switch (filters.sortBy) {
-        case 'name':
-          aVal = a.universityName.toLowerCase();
-          bVal = b.universityName.toLowerCase();
+        case 'universityName':
+          aVal = (a.universityName || '').toLowerCase();
+          bVal = (b.universityName || '').toLowerCase();
           break;
-        case 'ranking':
-          aVal = a.ranking || 999999;
-          bVal = b.ranking || 999999;
+        case 'apsScoreRequired':
+          aVal = a.apsScoreRequired || 0;
+          bVal = b.apsScoreRequired || 0;
           break;
-        case 'acceptanceRate':
-          aVal = a.acceptanceRate;
-          bVal = b.acceptanceRate;
+        case 'tuitionFeesAnnual':
+          aVal = a.tuitionFeesAnnual || 0;
+          bVal = b.tuitionFeesAnnual || 0;
           break;
-        case 'gpaRequired':
-          aVal = a.gpaRequired;
-          bVal = b.gpaRequired;
-          break;
-        case 'tuition':
-          aVal = a.tuition || 0;
-          bVal = b.tuition || 0;
+        case 'establishmentYear':
+          aVal = a.establishmentYear || 0;
+          bVal = b.establishmentYear || 0;
           break;
         default:
           return 0;
       }
       
-      if (filters.sortOrder === 'asc') {
-        return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
-      } else {
+      if (filters.sortOrder === 'desc') {
         return aVal > bVal ? -1 : aVal < bVal ? 1 : 0;
+      } else {
+        return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
       }
     });
   }, [searchState.results, filters.sortBy, filters.sortOrder]);
@@ -196,22 +221,35 @@ const Search: React.FC = () => {
     handleSearch(page);
   };
 
-  // Initial load
-  useEffect(() => {
+  const retrySearch = () => {
+    console.log('Retrying search...');
+    setSearchState(prev => ({ ...prev, error: null }));
     handleSearch();
-  }, []);
+  };
 
-  // Auto-search when filters change
+  // Initial load - only search when the component mounts
   useEffect(() => {
-    handleSearch();
-  }, [filters]);
+    if (isFirstLoad) {
+      console.log('Initial load - performing first search');
+      setIsFirstLoad(false);
+      handleSearch();
+    }
+  }, [isFirstLoad, handleSearch]);
+
+  // Auto-search when filters change (but not on initial load)
+  useEffect(() => {
+    if (!isFirstLoad) {
+      console.log('Filters changed - performing search');
+      handleSearch();
+    }
+  }, [filters, isFirstLoad]);
 
   return (
     <div className="space-y-6">
       {/* Search Header */}
       <div className="bg-white rounded-lg shadow p-6">
         <div className="flex justify-between items-center mb-4">
-          <h1 className="text-2xl font-bold text-gray-900">Search Universities</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Search South African Universities</h1>
           <div className="flex items-center space-x-2">
             <button
               onClick={() => setViewMode(viewMode === 'list' ? 'grid' : 'list')}
@@ -278,120 +316,139 @@ const Search: React.FC = () => {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {/* GPA Range */}
+              {/* APS Score Range */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  GPA Range
+                  APS Score Range
                 </label>
                 <div className="flex space-x-2">
                   <input
                     type="number"
-                    step="0.1"
-                    min="0"
-                    max="4"
+                    min="20"
+                    max="50"
                     placeholder="Min"
-                    value={filters.minGPA || ''}
-                    onChange={(e) => handleFilterChange('minGPA', e.target.value ? parseFloat(e.target.value) : undefined)}
+                    value={filters.minAPS || ''}
+                    onChange={(e) => handleFilterChange('minAPS', e.target.value ? parseInt(e.target.value) : undefined)}
                     className="w-1/2 px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                   />
                   <input
                     type="number"
-                    step="0.1"
-                    min="0"
-                    max="4"
+                    min="20"
+                    max="50" 
                     placeholder="Max"
-                    value={filters.maxGPA || ''}
-                    onChange={(e) => handleFilterChange('maxGPA', e.target.value ? parseFloat(e.target.value) : undefined)}
+                    value={filters.maxAPS || ''}
+                    onChange={(e) => handleFilterChange('maxAPS', e.target.value ? parseInt(e.target.value) : undefined)}
                     className="w-1/2 px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>
               
-              {/* SAT Range */}
+              {/* Province */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  SAT Range
+                  Province
                 </label>
-                <div className="flex space-x-2">
-                  <input
-                    type="number"
-                    min="400"
-                    max="1600"
-                    placeholder="Min"
-                    value={filters.minSAT || ''}
-                    onChange={(e) => handleFilterChange('minSAT', e.target.value ? parseInt(e.target.value) : undefined)}
-                    className="w-1/2 px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                  />
-                  <input
-                    type="number"
-                    min="400"
-                    max="1600"
-                    placeholder="Max"
-                    value={filters.maxSAT || ''}
-                    onChange={(e) => handleFilterChange('maxSAT', e.target.value ? parseInt(e.target.value) : undefined)}
-                    className="w-1/2 px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+                <select
+                  value={filters.province || ''}
+                  onChange={(e) => handleFilterChange('province', e.target.value || undefined)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">All Provinces</option>
+                  {SA_PROVINCES.map(province => (
+                    <option key={province} value={province}>{province}</option>
+                  ))}
+                </select>
               </div>
               
-              {/* Acceptance Rate */}
+              {/* University Type */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Max Acceptance Rate (%)
+                  University Type
+                </label>
+                <select
+                  value={filters.universityType || ''}
+                  onChange={(e) => handleFilterChange('universityType', e.target.value as any)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">All Types</option>
+                  {UNIVERSITY_TYPES.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
+              
+              {/* Max Tuition Fees */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Max Tuition Fees (ZAR)
                 </label>
                 <input
                   type="number"
                   min="0"
-                  max="100"
-                  placeholder="e.g., 20"
-                  value={filters.maxAcceptanceRate || ''}
-                  onChange={(e) => handleFilterChange('maxAcceptanceRate', e.target.value ? parseFloat(e.target.value) : undefined)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              
-              {/* Location */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Location
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., California, CA, New York"
-                  value={filters.location?.[0] || ''}
-                  onChange={(e) => handleFilterChange('location', e.target.value ? [e.target.value] : undefined)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              
-              {/* Max Essays */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Max Essays Required
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="e.g., 5"
-                  value={filters.maxEssays || ''}
-                  onChange={(e) => handleFilterChange('maxEssays', e.target.value ? parseInt(e.target.value) : undefined)}
+                  placeholder="e.g., 80000"
+                  value={filters.maxTuitionFees || ''}
+                  onChange={(e) => handleFilterChange('maxTuitionFees', e.target.value ? parseInt(e.target.value) : undefined)}
                   className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
-              {/* Max Tuition */}
+              {/* Language Medium */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Max Tuition ($)
+                  Language Medium
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="e.g., 50000"
-                  value={filters.maxTuition || ''}
-                  onChange={(e) => handleFilterChange('maxTuition', e.target.value ? parseInt(e.target.value) : undefined)}
+                <select
+                  value={filters.languageMedium || ''}
+                  onChange={(e) => handleFilterChange('languageMedium', e.target.value || undefined)}
                   className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                />
+                >
+                  <option value="">All Languages</option>
+                  {LANGUAGE_MEDIUMS.map(lang => (
+                    <option key={lang} value={lang}>{lang}</option>
+                  ))}
+                </select>
+              </div>
+              
+              {/* Boolean Filters */}
+              <div className="space-y-3">
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="nsfas"
+                    checked={filters.nsfasAccredited === true}
+                    onChange={(e) => handleFilterChange('nsfasAccredited', e.target.checked ? true : undefined)}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="nsfas" className="ml-2 block text-sm text-gray-700">
+                    NSFAS Accredited
+                  </label>
+                </div>
+                
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="accommodation"
+                    checked={filters.accommodationAvailable === true}
+                    onChange={(e) => handleFilterChange('accommodationAvailable', e.target.checked ? true : undefined)}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="accommodation" className="ml-2 block text-sm text-gray-700">
+                    Accommodation Available
+                  </label>
+                </div>
+                
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="bachelorPass"
+                    checked={filters.bachelorPassRequired === true}
+                    onChange={(e) => handleFilterChange('bachelorPassRequired', e.target.checked ? true : undefined)}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="bachelorPass" className="ml-2 block text-sm text-gray-700">
+                    Bachelor Pass Required
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -412,7 +469,6 @@ const Search: React.FC = () => {
               <button
                 className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                 onClick={() => {
-                  // Navigate to comparison page
                   console.log('Compare universities:', comparisonList);
                 }}
               >
@@ -463,11 +519,10 @@ const Search: React.FC = () => {
               onChange={(e) => handleFilterChange('sortBy', e.target.value as any)}
               className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500"
             >
-              <option value="ranking">Ranking</option>
-              <option value="name">Name</option>
-              <option value="acceptanceRate">Acceptance Rate</option>
-              <option value="gpaRequired">GPA Required</option>
-              <option value="tuition">Tuition</option>
+              <option value="universityName">Name</option>
+              <option value="apsScoreRequired">APS Score Required</option>
+              <option value="tuitionFeesAnnual">Tuition Fees</option>
+              <option value="establishmentYear">Establishment Year</option>
             </select>
             <button
               onClick={() => handleFilterChange('sortOrder', filters.sortOrder === 'asc' ? 'desc' : 'asc')}
@@ -480,24 +535,35 @@ const Search: React.FC = () => {
         
         <div className="p-6">
           {searchState.loading ? (
-            <div className="flex justify-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            <div className="flex flex-col items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+              <p className="text-gray-600">Searching universities...</p>
             </div>
           ) : searchState.error ? (
             <div className="text-center py-12">
-              <div className="text-red-600 mb-2">{searchState.error}</div>
-              <button 
-                onClick={() => handleSearch()}
-                className="text-blue-600 hover:text-blue-700"
-              >
-                Try again
-              </button>
+              <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-red-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Search Error</h3>
+              <p className="text-red-600 mb-4">{searchState.error}</p>
+              <div className="space-x-2">
+                <button 
+                  onClick={retrySearch}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Try Again
+                </button>
+                <button 
+                  onClick={clearFilters}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                >
+                  Clear Filters
+                </button>
+              </div>
             </div>
           ) : sortedResults.length > 0 ? (
             <>
               <div className={viewMode === 'grid' ? 'grid grid-cols-1 lg:grid-cols-2 gap-6' : 'space-y-4'}>
                 {sortedResults.map((university) => (
-                  <UniversityCard
+                  <SAUniversityCard
                     key={university.id}
                     university={university}
                     isSaved={savedUniversities.has(university.id)}
@@ -522,10 +588,9 @@ const Search: React.FC = () => {
                       </button>
                     )}
                     
-                    {/* Page numbers */}
                     {Array.from({ length: Math.min(5, searchState.pagination.totalPages) }, (_, i) => {
-                      const pageNum = searchState.pagination!.page - 2 + i;
-                      if (pageNum < 1 || pageNum > searchState.pagination!.totalPages) return null;
+                      const pageNum = Math.max(1, searchState.pagination!.page - 2 + i);
+                      if (pageNum > searchState.pagination!.totalPages) return null;
                       
                       return (
                         <button
@@ -561,6 +626,12 @@ const Search: React.FC = () => {
               <p className="mt-1 text-sm text-gray-500">
                 Try adjusting your search query or filters.
               </p>
+              <button 
+                onClick={clearFilters}
+                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Clear All Filters
+              </button>
             </div>
           )}
         </div>
@@ -569,17 +640,7 @@ const Search: React.FC = () => {
   );
 };
 
-// University Card Component
-interface UniversityCardProps {
-  university: University;
-  isSaved: boolean;
-  onSave: (university: University) => void;
-  onCompare: (university: University) => void;
-  isInComparison: boolean;
-  viewMode: 'grid' | 'list';
-}
-
-const UniversityCard: React.FC<UniversityCardProps> = ({
+const SAUniversityCard: React.FC<SAUniversityCardProps> = ({
   university,
   isSaved,
   onSave,
@@ -589,9 +650,9 @@ const UniversityCard: React.FC<UniversityCardProps> = ({
 }) => {
   const formatCurrency = (amount?: number) => {
     if (!amount) return 'N/A';
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-ZA', {
       style: 'currency',
-      currency: 'USD',
+      currency: 'ZAR',
       maximumFractionDigits: 0,
     }).format(amount);
   };
@@ -607,14 +668,14 @@ const UniversityCard: React.FC<UniversityCardProps> = ({
               </h3>
               <div className="flex items-center text-sm text-gray-600 mt-1">
                 <MapPinIcon className="h-4 w-4 mr-1" />
-                {university.location}
+                {university.location}, {university.province}
               </div>
             </div>
             
             <div className="flex items-center space-x-2 ml-4">
-              {university.ranking && (
-                <span className="inline-block px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-                  #{university.ranking}
+              {university.universityType && (
+                <span className="inline-block px-2 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                  {university.universityType}
                 </span>
               )}
               
@@ -636,24 +697,24 @@ const UniversityCard: React.FC<UniversityCardProps> = ({
             <div className="flex items-center">
               <AcademicCapIcon className="h-4 w-4 text-gray-400 mr-2" />
               <div>
-                <span className="text-xs text-gray-500 block">GPA Required</span>
-                <p className="font-medium text-sm">{university.gpaRequired || 'N/A'}</p>
+                <span className="text-xs text-gray-500 block">APS Required</span>
+                <p className="font-medium text-sm">{university.apsScoreRequired || 'N/A'}</p>
               </div>
             </div>
             
             <div className="flex items-center">
-              <StarIcon className="h-4 w-4 text-gray-400 mr-2" />
+              <BuildingOfficeIcon className="h-4 w-4 text-gray-400 mr-2" />
               <div>
-                <span className="text-xs text-gray-500 block">SAT Range</span>
-                <p className="font-medium text-sm">{university.satRange || 'N/A'}</p>
+                <span className="text-xs text-gray-500 block">Student Pop.</span>
+                <p className="font-medium text-sm">{university.studentPopulation?.toLocaleString() || 'N/A'}</p>
               </div>
             </div>
             
             <div className="flex items-center">
-              <EyeIcon className="h-4 w-4 text-gray-400 mr-2" />
+              <CurrencyDollarIcon className="h-4 w-4 text-gray-400 mr-2" />
               <div>
-                <span className="text-xs text-gray-500 block">Acceptance Rate</span>
-                <p className="font-medium text-sm">{university.acceptanceRate}%</p>
+                <span className="text-xs text-gray-500 block">Annual Fees</span>
+                <p className="font-medium text-sm">{formatCurrency(university.tuitionFeesAnnual)}</p>
               </div>
             </div>
             
@@ -661,68 +722,55 @@ const UniversityCard: React.FC<UniversityCardProps> = ({
               <CalendarIcon className="h-4 w-4 text-gray-400 mr-2" />
               <div>
                 <span className="text-xs text-gray-500 block">Deadline</span>
-                <p className="font-medium text-sm">{university.deadline || 'N/A'}</p>
+                <p className="font-medium text-sm">{university.applicationDeadline || 'N/A'}</p>
               </div>
             </div>
           </div>
 
-          {/* Additional Info */}
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            {university.tuition && (
-              <div className="flex items-center">
-                <CurrencyDollarIcon className="h-4 w-4 text-gray-400 mr-2" />
-                <span className="text-gray-600">Tuition: {formatCurrency(university.tuition)}</span>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {university.nsfasAccredited && (
+              <div className="flex items-center text-green-600 text-xs bg-green-50 px-2 py-1 rounded-full">
+                <CheckBadgeIcon className="h-3 w-3 mr-1" />
+                <span>NSFAS Accredited</span>
               </div>
             )}
-            
-            {university.essaysRequired !== undefined && (
-              <div>
-                <span className="text-gray-600">Essays Required: {university.essaysRequired}</span>
+            {university.bursariesAvailable && (
+              <div className="flex items-center text-blue-600 text-xs bg-blue-50 px-2 py-1 rounded-full">
+                <StarIcon className="h-3 w-3 mr-1" />
+                <span>Bursaries Available</span>
+              </div>
+            )}
+            {university.accommodationAvailable && (
+              <div className="flex items-center text-purple-600 text-xs bg-purple-50 px-2 py-1 rounded-full">
+                <BuildingOfficeIcon className="h-3 w-3 mr-1" />
+                <span>Accommodation Available</span>
               </div>
             )}
           </div>
-          
-          {university.programs && (
-            <div className="mt-3">
-              <span className="text-xs text-gray-500">Programs: </span>
-              <span className="text-sm text-gray-700">{university.programs}</span>
-            </div>
-          )}
         </div>
       </div>
       
-      {/* Action Buttons */}
-      <div className="mt-4 flex space-x-2">
+      <div className="mt-4 flex justify-end space-x-2">
         <button
           onClick={() => onCompare(university)}
           disabled={isInComparison}
-          className={`px-3 py-1 text-sm rounded border ${
-            isInComparison
-              ? 'bg-green-100 text-green-800 border-green-300'
-              : 'border-gray-300 hover:bg-gray-50'
+          className={`px-4 py-2 border rounded text-sm font-medium transition-colors ${
+            isInComparison 
+              ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-300'
+              : 'bg-blue-600 text-white hover:bg-blue-700 border-blue-600'
           }`}
         >
-          {isInComparison ? 'In Comparison' : 'Compare'}
+          {isInComparison ? 'Added to Compare' : 'Add to Compare'}
         </button>
-        
-        <button className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50">
+        <button
+          className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-sm font-medium"
+          onClick={() => console.log('View details:', university.id)}
+        >
           View Details
         </button>
       </div>
     </div>
   );
 };
-
-// Debounce utility function
-function debounce<T extends (...args: any[]) => any>(
-  func: T,
-  wait: number
-): (...args: Parameters<T>) => void {
-  let timeout: NodeJS.Timeout;
-  return (...args: Parameters<T>) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
-  };
-}
 
 export default Search;

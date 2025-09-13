@@ -1,6 +1,6 @@
 // frontend/src/services/api.ts
 import axios, { AxiosError, AxiosResponse } from 'axios';
-
+import { University, StudentProfile, ApiResponse, SearchFilters, Recommendation, PaginatedResponse } from '../types';
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 // Create axios instance with default configuration
@@ -78,113 +78,84 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
-
-// Enhanced Types
-export interface University {
-  id: string;
-  universityName: string;
-  location: string;
-  deadline: string;
-  gpaRequired: number;
-  satRange: string;
-  satLow?: number;
-  satHigh?: number;
-  acceptanceRate: number;
-  essaysRequired: number;
-  applicationFee: number;
-  requirements: string;
-  programs: string;
-  ranking?: number;
-  // Additional fields that might be useful
-  website?: string;
-  description?: string;
-  studentCount?: number;
-  tuition?: number;
-  dormCost?: number;
-  averageFinancialAid?: number;
-}
-
-export interface StudentProfile {
-  name?: string;
-  gpa: number;
-  sat?: number;
-  act?: number;
-  locationPreference?: string[];
-  intendedMajor?: string;
-  maxEssays?: number;
-  // Additional profile fields
-  extracurriculars?: string[];
-  awards?: string[];
-  workExperience?: string[];
-  budgetRange?: {
-    min: number;
-    max: number;
+  // Updated searchUniversities function for api.ts
+  export const searchUniversities = async (
+    query: string, 
+    filters?: SearchFilters,
+    page: number = 1,
+    limit: number = 20
+  ): Promise<PaginatedResponse<University[]>> => {
+    try {
+      // Ensure query is not empty
+      const searchQuery = query?.trim() || '*';
+      
+      // Clean filters - remove undefined/null values
+      const cleanFilters = filters ? Object.entries(filters).reduce((acc, [key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          (acc as any)[key] = value;
+        }
+        return acc;
+      }, {} as SearchFilters) : {};
+      
+      console.log('Making search request:', {
+        query: searchQuery,
+        filters: cleanFilters,
+        pagination: { page, limit }
+      });
+      
+      const requestBody = { 
+        query: searchQuery, 
+        filters: cleanFilters, 
+        pagination: { page, limit } 
+      };
+      
+      const response = await api.post('/api/search', requestBody);
+      
+      // Log the response for debugging
+      console.log('Search response received:', response.data);
+      
+      // Handle different response structures
+      if (response.data.success) {
+        return {
+          success: true,
+          data: response.data.data || response.data.results || [],
+          pagination: response.data.pagination,
+          message: response.data.message || 'Search completed successfully'
+        };
+      } else {
+        throw new Error(response.data.error || 'Search request failed');
+      }
+      
+    } catch (error: any) {
+      console.error('Search universities error:', error);
+      
+      // Enhanced error handling
+      let errorMessage = 'Failed to search universities';
+      
+      if (error.response?.status === 500) {
+        errorMessage = 'Server error occurred. Please try again or contact support.';
+        
+        // Log detailed error for development
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Server error details:', error.response.data);
+        }
+      } else if (error.response?.status === 400) {
+        errorMessage = error.response.data?.error || 'Invalid search request';
+      } else if (error.code === 'NETWORK_ERROR' || error.message.includes('Network Error')) {
+        errorMessage = 'Network error. Please check your connection and try again.';
+      } else if (error.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      }
+      
+      // Return error in expected format
+      return {
+        success: false,
+        data: [],
+        pagination: undefined,
+        error: errorMessage
+      };
+    }
   };
-}
-
-export interface Recommendation {
-  university: University;
-  matchScore: number;
-  category: 'Safety' | 'Target' | 'Reach';
-  reasoning: string;
-  // Additional recommendation data
-  financialFit?: 'Good' | 'Moderate' | 'Stretch';
-  academicFit?: 'Excellent' | 'Good' | 'Competitive';
-}
-
-export interface SearchFilters {
-  minGPA?: number;
-  maxGPA?: number;
-  minSAT?: number;
-  maxSAT?: number;
-  minACT?: number;
-  maxACT?: number;
-  maxAcceptanceRate?: number;
-  location?: string[];
-  maxEssays?: number;
-  minRanking?: number;
-  maxRanking?: number;
-  maxTuition?: number;
-  programs?: string[];
-}
-
-export interface ApiResponse<T = any> {
-  success: boolean;
-  data?: T;
-  message?: string;
-  error?: string;
-  timestamp?: string;
-}
-
-export interface PaginatedResponse<T> extends ApiResponse<T> {
-  pagination?: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-    hasNext: boolean;
-    hasPrev: boolean;
-  };
-}
-
-// Enhanced API Functions with proper error handling
-export const searchUniversities = async (
-  query: string, 
-  filters?: SearchFilters,
-  page: number = 1,
-  limit: number = 20
-): Promise<PaginatedResponse<University[]>> => {
-  try {
-    const response = await api.post('/api/search', { 
-      query, 
-      filters, 
-      pagination: { page, limit } 
-    });
-    return response.data;
-  } catch (error: any) {
-    throw new Error(error.response?.data?.message || 'Failed to search universities');
-  }
-};
 
 export const getAllUniversities = async (
   page: number = 1,

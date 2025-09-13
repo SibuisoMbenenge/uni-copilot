@@ -13,7 +13,7 @@ require('dotenv').config();
 const SearchService = require('./services/searchService');
 const PDFProcessor = require('./services/pdfProcessor');
 const ComparisonService = require('./services/comparisonService');
-const RecommendationService = require('./services/recommendationService');
+// const RecommendationService = require('./services/recommendationService');
 
 // Initialize Express app
 const app = express();
@@ -34,7 +34,7 @@ app.use(express.urlencoded({ extended: true }));
 const searchService = new SearchService();
 const pdfProcessor = new PDFProcessor();
 const comparisonService = new ComparisonService();
-const recommendationService = new RecommendationService();
+// const recommendationService = new RecommendationService();
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -45,23 +45,106 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Search universities
+// Updated search endpoint in server.js
 app.post('/api/search', async (req, res) => {
     try {
-        const { query = '*', filters = {}, top = 10 } = req.body;
+        const { 
+            query = '*', 
+            filters = {}, 
+            pagination = { page: 1, limit: 20 }
+        } = req.body;
         
-        const results = await searchService.search(query, filters, top);
+        // Extract pagination parameters
+        const page = Math.max(1, parseInt(pagination.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(pagination.limit) || 20));
+        const skip = (page - 1) * limit;
         
-        res.json({
-            success: true,
-            results: results,
-            count: results.length
+        // Extract sorting parameters from filters
+        const sortBy = filters.sortBy || 'universityName';
+        const sortOrder = filters.sortOrder || 'asc';
+        
+        // Clean filters - remove pagination/sorting specific fields
+        const searchFilters = { ...filters };
+        delete searchFilters.sortBy;
+        delete searchFilters.sortOrder;
+        
+        console.log('Search request:', { query, filters: searchFilters, pagination: { page, limit }, sort: { sortBy, sortOrder } });
+        
+        // Perform the search
+        const searchResults = await searchService.search(query, searchFilters, limit + skip); // Get more results for pagination
+        
+        // Apply sorting
+        const sortedResults = searchResults.sort((a, b) => {
+            let aVal, bVal;
+            
+            switch (sortBy) {
+                case 'universityName':
+                    aVal = (a.universityName || '').toLowerCase();
+                    bVal = (b.universityName || '').toLowerCase();
+                    break;
+                case 'apsScoreRequired':
+                    aVal = a.apsScoreRequired || 0;
+                    bVal = b.apsScoreRequired || 0;
+                    break;
+                case 'tuitionFeesAnnual':
+                    aVal = a.tuitionFeesAnnual || 0;
+                    bVal = b.tuitionFeesAnnual || 0;
+                    break;
+                case 'establishmentYear':
+                    aVal = a.establishmentYear || 0;
+                    bVal = b.establishmentYear || 0;
+                    break;
+                default:
+                    aVal = a.universityName || '';
+                    bVal = b.universityName || '';
+            }
+            
+            if (sortOrder === 'desc') {
+                return aVal > bVal ? -1 : aVal < bVal ? 1 : 0;
+            } else {
+                return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+            }
         });
+        
+        // Apply pagination
+        const totalResults = sortedResults.length;
+        const paginatedResults = sortedResults.slice(skip, skip + limit);
+        const totalPages = Math.ceil(totalResults / limit);
+        
+        const response = {
+            success: true,
+            data: paginatedResults,
+            pagination: {
+                page: page,
+                limit: limit,
+                total: totalResults,
+                totalPages: totalPages,
+                hasNext: page < totalPages,
+                hasPrev: page > 1
+            },
+            meta: {
+                searchQuery: query,
+                filtersApplied: Object.keys(searchFilters).length > 0,
+                sortBy: sortBy,
+                sortOrder: sortOrder
+            }
+        };
+        
+        console.log('Search response:', { 
+            totalResults, 
+            returnedResults: paginatedResults.length, 
+            page, 
+            totalPages 
+        });
+        
+        res.json(response);
+        
     } catch (error) {
         console.error('Search error:', error);
         res.status(500).json({
             success: false,
-            error: error.message
+            error: error.message,
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
 });
@@ -137,25 +220,25 @@ app.post('/api/compare', async (req, res) => {
     }
 });
 
-// Get recommendations
-app.post('/api/recommend', async (req, res) => {
-    try {
-        const studentProfile = req.body;
+// // Get recommendations
+// app.post('/api/recommend', async (req, res) => {
+//     try {
+//         const studentProfile = req.body;
         
-        const recommendations = await recommendationService.recommend(studentProfile);
+//         const recommendations = await recommendationService.recommend(studentProfile);
         
-        res.json({
-            success: true,
-            recommendations: recommendations
-        });
-    } catch (error) {
-        console.error('Recommendation error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
+//         res.json({
+//             success: true,
+//             recommendations: recommendations
+//         });
+//     } catch (error) {
+//         console.error('Recommendation error:', error);
+//         res.status(500).json({
+//             success: false,
+//             error: error.message
+//         });
+//     }
+// });
 
 // Upload and process PDF
 app.post('/api/upload-pdf', upload.single('file'), async (req, res) => {

@@ -1,14 +1,3 @@
-import { Recommendation, SearchFilters, StudentProfile, University } from './services/api';
-
-// Re-export types from API service for consistency
-export type {
-  University,
-  StudentProfile,
-  Recommendation,
-  SearchFilters,
-  ApiResponse,
-  PaginatedResponse,
-} from './services/api';
 
 // Additional UI-specific types not covered in api.ts
 export interface ComparisonResult {
@@ -241,4 +230,139 @@ export const APP_CONFIG = {
   DEBOUNCE_DELAY: 300,
 } as const;
 
+export interface SAUniversityCardProps {
+  university: University;
+  isSaved: boolean;
+  onSave: (university: University) => void;
+  onCompare: (university: University) => void;
+  isInComparison: boolean;
+  viewMode: 'grid' | 'list';
+}
+export interface SearchState {
+  query: string;
+  results: University[];
+  loading: boolean;
+  error: string | null;
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  } | null;
+}
 
+export interface SASearchFilters extends SearchFilters {
+  minAPS?: number;
+  maxAPS?: number;
+  province?: string;
+  universityType?: 'Traditional' | 'University of Technology' | 'Comprehensive';
+  maxTuitionFees?: number;
+  nsfasAccredited?: boolean;
+  bachelorPassRequired?: boolean;
+  languageMedium?: string;
+  accommodationAvailable?: boolean;
+  sortBy: 'universityName' | 'apsScoreRequired' | 'tuitionFeesAnnual' | 'establishmentYear';
+  sortOrder: 'asc' | 'desc';
+}
+
+export interface University {
+  id: string;
+  universityName: string;
+  location: string;
+  province: string;
+  city?: string;
+  applicationDeadline?: string;
+  apsScoreRequired?: number;
+  matricRequirements?: string;
+  bachelorPassRequired?: boolean;
+  subjectRequirements?: string[];
+  languageMedium?: string[];
+  tuitionFeesAnnual?: number;
+  accommodationAvailable?: boolean;
+  nsfasAccredited?: boolean;
+  bursariesAvailable?: boolean;
+  programs?: string[];
+  faculties?: string[];
+  universityType?: string;
+  establishmentYear?: number;
+  studentPopulation?: number;
+  description?: string;
+  // Additional fields from the original interface
+  deadline?: string;
+  gpaRequired?: number;
+  satRange?: string;
+  satLow?: number;
+  satHigh?: number;
+  acceptanceRate?: number;
+  essaysRequired?: number;
+  applicationFee?: number;
+  requirements?: string;
+  ranking?: number;
+  website?: string;
+}
+
+export interface StudentProfile {
+  name?: string;
+  gpa: number;
+  sat?: number;
+  act?: number;
+  locationPreference?: string[];
+  intendedMajor?: string;
+  maxEssays?: number;
+  // Additional profile fields
+  extracurriculars?: string[];
+  awards?: string[];
+  workExperience?: string[];
+  budgetRange?: {
+    min: number;
+    max: number;
+  };
+}
+
+export interface SearchFilters {
+  minGPA?: number;
+  maxGPA?: number;
+  minSAT?: number;
+  maxSAT?: number;
+  minACT?: number;
+  maxACT?: number;
+  maxAcceptanceRate?: number;
+  location?: string[];
+  maxEssays?: number;
+  minRanking?: number;
+  maxRanking?: number;
+  maxTuition?: number;
+  programs?: string[];
+}
+
+export interface Recommendation {
+  university: University;
+  matchScore: number;
+  category: 'Safety' | 'Target' | 'Reach';
+  reasoning: string;
+  // Additional recommendation data
+  financialFit?: 'Good' | 'Moderate' | 'Stretch';
+  academicFit?: 'Excellent' | 'Good' | 'Competitive';
+}
+
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
+  timestamp?: string;
+}
+
+
+export interface PaginatedResponse<T> extends ApiResponse<T> {
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
+}
