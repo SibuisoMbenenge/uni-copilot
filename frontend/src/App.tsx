@@ -3,9 +3,9 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 import Search from './pages/Search';
-// import Compare from './pages/Compare';
-// import Profile from './pages/Profile';
-// import Recommendations from './pages/Recommendations';
+import Compare from './pages/Compare';
+import Profile from './pages/Profile';
+import Recommendations from './pages/Recommendations';
 
 function App() {
   return (
@@ -16,9 +16,9 @@ function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/search" element={<Search />} />
-            {/* <Route path="/compare" element={<Compare />} />
+            <Route path="/compare" element={<Compare />} />
             <Route path="/profile" element={<Profile />} />
-            <Route path="/recommendations" element={<Recommendations />} /> */}
+            <Route path="/recommendations" element={<Recommendations />} />
           </Routes>
         </main>
       </div>
