@@ -1,38 +1,262 @@
-.App {
-  text-align: center;
+/* frontend/src/App.css */
+/* src/index.css */
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+::-webkit-scrollbar-track {
+  background-color: #f3f4f6; /* bg-gray-100 */
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+::-webkit-scrollbar-thumb {
+  background-color: #d1d5db; /* bg-gray-300 */
+  border-radius: 9999px;     /* rounded-full */
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+::-webkit-scrollbar-thumb:hover {
+  background-color: #9ca3af; /* bg-gray-400 */
 }
 
-.App-link {
-  color: #61dafb;
+/* Custom animations */
+.fade-in {
+  animation: fadeIn 0.3s ease-in-out;
 }
 
-@keyframes App-logo-spin {
+@keyframes fadeIn {
   from {
-    transform: rotate(0deg);
+    opacity: 0;
+    transform: translateY(10px);
   }
   to {
-    transform: rotate(360deg);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Loading animation */
+.pulse-loading {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Focus styles */
+.focus-ring {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+/* Card hover effects */
+.hover-card {
+  transition: all 0.2s ease-in-out;
+}
+
+.hover-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1),
+              0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* Button styles */
+.btn-primary {
+  background-color: #2563eb; /* bg-blue-600 */
+  color: #ffffff;
+  padding: 0.5rem 1rem;      /* px-4 py-2 */
+  border-radius: 0.5rem;     /* rounded-lg */
+  transition: background-color 0.2s ease-in-out;
+}
+
+.btn-primary:hover {
+  background-color: #1d4ed8; /* hover:bg-blue-700 */
+}
+
+.btn-primary:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+.btn-secondary {
+  background-color: #e5e7eb; /* bg-gray-200 */
+  color: #111827;             /* text-gray-900 */
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.btn-secondary:hover {
+  background-color: #d1d5db; /* hover:bg-gray-300 */
+}
+
+.btn-secondary:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(107, 114, 128, 0.5);
+}
+
+/* Form styles */
+.form-input,
+.form-select {
+  width: 100%;
+  padding: 0.5rem 0.75rem;      /* px-3 py-2 */
+  border: 1px solid #d1d5db;    /* border-gray-300 */
+  border-radius: 0.5rem;         /* rounded-lg */
+  transition: all 0.2s ease-in-out;
+}
+
+.form-input:focus,
+.form-select:focus {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); /* focus:ring-2 focus:ring-blue-500 */
+}
+
+/* Badge styles */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.625rem; /* px-2.5 py-0.5 */
+  border-radius: 9999px;      /* rounded-full */
+  font-size: 0.75rem;         /* text-xs */
+  font-weight: 500;
+}
+
+.badge-success {
+  background-color: #d1fae5; /* bg-green-100 */
+  color: #065f46;            /* text-green-800 */
+}
+
+.badge-warning {
+  background-color: #fef3c7; /* bg-yellow-100 */
+  color: #78350f;             /* text-yellow-800 */
+}
+
+.badge-error {
+  background-color: #fee2e2; /* bg-red-100 */
+  color: #991b1b;            /* text-red-800 */
+}
+
+.badge-info {
+  background-color: #dbeafe; /* bg-blue-100 */
+  color: #1e40af;            /* text-blue-800 */
+}
+
+/* Progress bar */
+.progress-bar {
+  background-color: #e5e7eb; /* bg-gray-200 */
+  border-radius: 9999px;     /* rounded-full */
+}
+
+.progress-fill {
+  background-color: #2563eb; /* bg-blue-600 */
+  border-radius: 9999px;
+  transition: all 0.3s ease-out;
+}
+
+/* Responsive table */
+.responsive-table {
+  min-width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+.responsive-table thead {
+  background-color: #f9fafb; /* bg-gray-50 */
+}
+
+.responsive-table th {
+  padding: 0.75rem 1.5rem; /* px-6 py-3 */
+  text-align: left;
+  font-size: 0.75rem;      /* text-xs */
+  font-weight: 500;
+  text-transform: uppercase;
+  color: #6b7280;          /* text-gray-500 */
+  letter-spacing: 0.05em;  /* tracking-wider */
+}
+
+.responsive-table td {
+  padding: 0.75rem 1.5rem; /* px-6 py-4 */
+  font-size: 0.875rem;      /* text-sm */
+  color: #111827;            /* text-gray-900 */
+  white-space: nowrap;
+}
+
+.responsive-table tbody tr:nth-child(even) {
+  background-color: #f9fafb; /* bg-gray-50 */
+}
+
+/* Custom checkbox */
+.custom-checkbox {
+  border-radius: 0.25rem; /* rounded */
+  border: 1px solid #d1d5db;
+  color: #2563eb;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.custom-checkbox:focus {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 2px rgba(191, 219, 254, 0.5);
+}
+
+/* File upload area */
+.file-upload-area {
+  border-width: 2px;
+  border-style: dashed;
+  border-color: #d1d5db;  /* border-gray-300 */
+  border-radius: 0.5rem;   /* rounded-lg */
+  padding: 1.5rem;         /* p-6 */
+  text-align: center;
+  transition: all 0.2s ease-in-out;
+}
+
+.file-upload-area.dragover {
+  border-color: #3b82f6;   /* border-blue-400 */
+  background-color: #eff6ff; /* bg-blue-50 */
+}
+
+/* Notification styles */
+.notification {
+  position: fixed;
+  top: 1rem; right: 1rem;
+  max-width: 20rem;
+  width: 100%;
+  background-color: #ffffff;
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+  border-radius: 0.5rem;
+  pointer-events: auto;
+  overflow: hidden;
+  z-index: 50;
+}
+
+.notification-success {
+  border-left: 4px solid #22c55e; /* border-green-400 */
+}
+
+.notification-error {
+  border-left: 4px solid #ef4444; /* border-red-400 */
+}
+
+.notification-warning {
+  border-left: 4px solid #f59e0b; /* border-yellow-400 */
+}
+
+.notification-info {
+  border-left: 4px solid #3b82f6; /* border-blue-400 */
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+  .container {
+    padding-left: 0.5rem;  /* px-2 */
+    padding-right: 0.5rem;
+  }
+  
+  .responsive-table {
+    font-size: 14px;
+  }
+  
+  .responsive-table th,
+  .responsive-table td {
+    padding: 0.5rem 0.75rem; /* px-3 py-2 */
   }
 }
