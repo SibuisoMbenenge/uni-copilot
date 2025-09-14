@@ -78,6 +78,28 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+export const askAIQuestion = async (question: string): Promise<ApiResponse<{
+  answer: string;
+  sources: Array<{
+    fileName: string;
+    universityName: string;
+    relevantContent: string;
+  }>;
+  searchType: string;
+}>> => {
+  try {
+    if (!question.trim()) {
+      throw new Error('Question cannot be empty');
+    }
+    
+    const response = await api.post('/api/ask', { question });
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.message || 'Failed to get AI response');
+  }
+};
+
   // Updated searchUniversities function for api.ts
   export const searchUniversities = async (
     query: string, 

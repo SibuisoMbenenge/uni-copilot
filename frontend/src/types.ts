@@ -268,6 +268,8 @@ export interface SASearchFilters extends SearchFilters {
 }
 
 export interface University {
+  content: any;
+  summary: any;
   id: string;
   universityName: string;
   location: string;

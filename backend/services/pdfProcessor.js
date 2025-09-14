@@ -2,18 +2,18 @@
  * Enhanced PDF Processor for AI-Powered Search
  * Processes PDFs for both structured data extraction AND AI contextual search
  */
-
+//pdfProcessor.js
 const fs = require('fs').promises;
 const path = require('path');
 const pdf = require('pdf-parse');
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const {BlobServiceClient} = require('@azure/storage-blob');
-const SearchService = require('./searchService');
+const PDFContextSearchService = require('./searchService');
 
 class EnhancedUniversityProcessor {
 constructor() {
-    this.searchService = new SearchService();
+    this.searchService = new PDFContextSearchService();
     this.dataDir = path.join(__dirname, '../data'); // still kept as fallback
     this.processedDir = path.join(__dirname, '../processed');
     this.chunkSize = 2000;
@@ -56,7 +56,7 @@ constructor() {
                     type: 'Traditional'
                 },
                 {
-                    file: 'stellies pt2 International Curriculum.pdf',
+                    file: 'stellies pt2 International Curriculum Undergraduate Admission Requirements.pdf', // Updated name
                     university: 'Stellenbosch University',
                     province: 'Western Cape',
                     city: 'Stellenbosch',
@@ -79,14 +79,14 @@ constructor() {
                     type: 'Traditional'
                 },
                 {
-                    file: 'UP_ug-prospectus-2026_nsc-ieb_deg-dip.pdf',
+                    file: 'UP_ug-prospectus-2026_nsc-ieb_devv4_web.zp260601.pdf', // Make sure this matches exactly
                     university: 'University of Pretoria',
                     province: 'Gauteng',
                     city: 'Pretoria',
                     type: 'Traditional'
                 },
                 {
-                    file: 'wits 2026 Guide for Undergrad Applicants.pdf',
+                    file: 'wits 2026 Guide for Undergrad Applicants Web.pdf', // Check the exact filename
                     university: 'University of the Witwatersrand',
                     province: 'Gauteng',
                     city: 'Johannesburg',
@@ -197,6 +197,18 @@ constructor() {
         } catch (error) {
             console.error(`Error extracting structured data from ${filePath}:`, error.message);
             return null;
+        }
+    }
+
+    // Add this method to EnhancedUniversityProcessor class
+    async processPDF(filePath) {
+        try {
+            const dataBuffer = await fs.readFile(filePath);
+            const data = await pdf(dataBuffer);
+            return this.cleanText(data.text);
+        } catch (error) {
+            console.error(`Error processing PDF ${filePath}:`, error);
+            throw error;
         }
     }
 
@@ -439,25 +451,34 @@ constructor() {
     }
 
     /**
-     * Test the AI search functionality
+     * Test the AI search functionality using the integrated search service
      */
     async testAISearch(query = "What are the engineering admission requirements?") {
         try {
             console.log(`\n🔍 Testing AI search with query: "${query}"`);
             
+            // Use the searchService's searchWithAI method directly
             const result = await this.searchService.searchWithAI(query);
             
             console.log('\n🤖 AI Response:');
             console.log('='.repeat(60));
             console.log(result.answer);
             
-            console.log('\n📚 Sources Used:');
-            console.log('='.repeat(60));
-            result.sources.forEach((source, index) => {
-                console.log(`${index + 1}. ${source.fileName}`);
-                console.log(`   University: ${source.universityName}`);
-                console.log(`   Content: ${source.relevantContent}\n`);
-            });
+            if (result.sources && result.sources.length > 0) {
+                console.log('\n📚 Sources Used:');
+                console.log('='.repeat(60));
+                result.sources.forEach((source, index) => {
+                    console.log(`${index + 1}. ${source.fileName}`);
+                    console.log(`   University: ${source.universityName}`);
+                    console.log(`   Content: ${source.relevantContent.substring(0, 150)}...\n`);
+                });
+            }
+            
+            console.log(`\n📊 Search Metadata:`);
+            console.log(`   Documents Searched: ${result.documentsSearched || 'N/A'}`);
+            console.log(`   Relevant Documents: ${result.relevantDocuments || 'N/A'}`);
+            console.log(`   Search Type: ${result.searchType}`);
+            console.log(`   Success: ${result.success}`);
             
             return result;
             
@@ -466,7 +487,6 @@ constructor() {
             return null;
         }
     }
-
     // Keep all your existing extraction methods
     extractUniversityInfo(text, mapping) {
         const { university, province, city, type, isInternational } = mapping;
