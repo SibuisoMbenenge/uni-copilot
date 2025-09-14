@@ -12,7 +12,6 @@ import {
 
 const Compare: React.FC = () => {
   const [universities, setUniversities] = useState<University[]>([]);
-  //const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
   const [loadingState, setLoadingState] = useState<LoadingState>({ isLoading: false });
   const [errorState, setErrorState] = useState<ErrorState>({ hasError: false });
@@ -78,11 +77,12 @@ const Compare: React.FC = () => {
       console.log('Comparison response:', response);
       
       if (response.success && response.data) {
+        // Updated to match the new API structure
         setComparisonResult({
-          summary: response.data.comparison.summary,
-          highlights: response.data.comparison.highlights,
-          universities: response.data.comparison.universities,
-          comparison: response.data.comparison.analysis
+          summary: response.data.summary || 'Comparison completed',
+          highlights: response.data.highlights || [],
+          universities: response.data.universities || [],
+          comparison: response.data.analysis || null
         });
       } else {
         throw new Error(response.message || 'Failed to compare universities');
@@ -117,6 +117,12 @@ const Compare: React.FC = () => {
   };
 
   const getSelectedUniversities = (): University[] => {
+    // First try to get universities from comparison result (which should be the most up-to-date)
+    if (comparisonResult && comparisonResult.universities && comparisonResult.universities.length > 0) {
+      return comparisonResult.universities;
+    }
+    
+    // Fallback to the original universities list
     return selectedIds
       .map(id => universities.find(u => u.id === id))
       .filter((uni): uni is University => uni !== undefined);
@@ -288,6 +294,22 @@ const Compare: React.FC = () => {
             </div>
           )}
 
+          {/* Analysis Section - New addition to display the analysis data */}
+          {comparisonResult.comparison && (
+            <div className="bg-white rounded-lg shadow p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Analysis</h3>
+              <div className="text-gray-700">
+                {typeof comparisonResult.comparison === 'string' ? (
+                  <p>{comparisonResult.comparison}</p>
+                ) : (
+                  <pre className="whitespace-pre-wrap text-sm bg-gray-50 p-4 rounded">
+                    {JSON.stringify(comparisonResult.comparison, null, 2)}
+                  </pre>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Comparison Table */}
           <div className="bg-white rounded-lg shadow overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-200">
@@ -304,11 +326,11 @@ const Compare: React.FC = () => {
                       <th 
                         key={uni.id} 
                         className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        title={uni.universityName}
+                        title={uni.universityName || uni.universityName}
                       >
-                        {uni.universityName.length > 20 
-                          ? `${uni.universityName.substring(0, 20)}...` 
-                          : uni.universityName}
+                        {(uni.universityName || uni.universityName || 'Unknown').length > 20 
+                          ? `${(uni.universityName || uni.universityName || 'Unknown').substring(0, 20)}...` 
+                          : (uni.universityName || uni.universityName || 'Unknown')}
                       </th>
                     ))}
                   </tr>
