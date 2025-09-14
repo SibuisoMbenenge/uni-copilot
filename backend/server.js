@@ -206,6 +206,8 @@ app.post('/api/compare', async (req, res) => {
         }
         
         const comparison = await comparisonService.compare(universityIds);
+
+        //console.log('Comparison result:', comparison);
         
         res.json({
             success: true,
