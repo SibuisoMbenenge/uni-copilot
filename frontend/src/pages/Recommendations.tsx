@@ -21,8 +21,50 @@ import {
   TrophyIcon
 } from '@heroicons/react/24/outline';
 import { BookmarkIcon as BookmarkSolidIcon } from '@heroicons/react/24/solid';
-import { getRecommendations, getProfile } from '../services/api';
-import type { Recommendation, StudentProfile } from '../types';
+
+// Types
+interface StudentProfile {
+  gpa: number;
+  sat?: number;
+  act?: number;
+  intendedMajor?: string;
+  extracurriculars?: string[];
+  essays?: number;
+  location?: string;
+}
+
+interface University {
+  id: string;
+  universityName: string;
+  location: string;
+  ranking?: number;
+  gpaRequired: string;
+  satRange?: string;
+  actRange?: string;
+  acceptanceRate: number;
+  applicationFee: number;
+  deadline: string;
+  essaysRequired: number;
+  tuition: number;
+  studentCount: number;
+  programs?: string;
+  requirements?: string;
+}
+
+interface Recommendation {
+  university: University;
+  matchScore: number;
+  category: 'Safety' | 'Target' | 'Reach';
+  reasoning: string;
+  academicFit?: 'Excellent' | 'Good' | 'Fair';
+  financialFit?: 'Good' | 'Moderate' | 'Challenging';
+}
+
+interface ProfileAnalysis {
+  strengths: string[];
+  areasForImprovement: string[];
+  suggestions: string[];
+}
 
 interface RecommendationFilters {
   categories: ('Safety' | 'Target' | 'Reach')[];
@@ -34,11 +76,263 @@ interface RecommendationFilters {
   sortOrder: 'asc' | 'desc';
 }
 
-interface ProfileAnalysis {
-  strengths: string[];
-  areasForImprovement: string[];
-  suggestions: string[];
-}
+// Mock data generator
+const generateMockRecommendations = (profile: StudentProfile): { 
+  recommendations: Recommendation[], 
+  profileAnalysis: ProfileAnalysis 
+} => {
+  const universities: University[] = [
+    {
+      id: '1',
+      universityName: 'University of Cape Town',
+      location: 'Cape Town, Western Cape',
+      ranking: 1,
+      gpaRequired: '3.5+',
+      satRange: '1200-1400',
+      acceptanceRate: 18,
+      applicationFee: 1200,
+      deadline: '2024-09-30',
+      essaysRequired: 2,
+      tuition: 85000,
+      studentCount: 29000,
+      programs: 'Engineering, Medicine, Commerce, Humanities, Science',
+      requirements: 'NSC with Bachelor Pass, English proficiency, Mathematics 70%+'
+    },
+    {
+      id: '2',
+      universityName: 'University of the Witwatersrand',
+      location: 'Johannesburg, Gauteng',
+      ranking: 2,
+      gpaRequired: '3.6+',
+      satRange: '1250-1450',
+      acceptanceRate: 15,
+      applicationFee: 1500,
+      deadline: '2024-09-30',
+      essaysRequired: 1,
+      tuition: 92000,
+      studentCount: 37000,
+      programs: 'Engineering, Health Sciences, Commerce, Law, Humanities',
+      requirements: 'NSC with Bachelor Pass, APS 36+, English and Mathematics requirements'
+    },
+    {
+      id: '3',
+      universityName: 'Stellenbosch University',
+      location: 'Stellenbosch, Western Cape',
+      ranking: 3,
+      gpaRequired: '3.4+',
+      satRange: '1150-1350',
+      acceptanceRate: 22,
+      applicationFee: 1100,
+      deadline: '2024-06-30',
+      essaysRequired: 1,
+      tuition: 78000,
+      studentCount: 32000,
+      programs: 'Engineering, AgriSciences, Medicine, Arts, Economic Sciences',
+      requirements: 'NSC with Bachelor Pass, Language requirements, Mathematics 60%+'
+    },
+    {
+      id: '4',
+      universityName: 'University of Pretoria',
+      location: 'Pretoria, Gauteng',
+      ranking: 4,
+      gpaRequired: '3.3+',
+      satRange: '1100-1300',
+      acceptanceRate: 25,
+      applicationFee: 1000,
+      deadline: '2024-08-31',
+      essaysRequired: 1,
+      tuition: 75000,
+      studentCount: 53000,
+      programs: 'Engineering, Natural Sciences, Health Sciences, Law, Education',
+      requirements: 'NSC with Bachelor Pass, APS 32+, Subject-specific requirements'
+    },
+    {
+      id: '5',
+      universityName: 'Rhodes University',
+      location: 'Makhanda, Eastern Cape',
+      ranking: 5,
+      gpaRequired: '3.2+',
+      satRange: '1050-1250',
+      acceptanceRate: 35,
+      applicationFee: 900,
+      deadline: '2024-09-30',
+      essaysRequired: 2,
+      tuition: 68000,
+      studentCount: 8200,
+      programs: 'Humanities, Science, Commerce, Law, Pharmacy',
+      requirements: 'NSC with Bachelor Pass, English 60%+, Subject requirements'
+    },
+    {
+      id: '6',
+      universityName: 'University of KwaZulu-Natal',
+      location: 'Durban, KwaZulu-Natal',
+      ranking: 6,
+      gpaRequired: '3.0+',
+      satRange: '1000-1200',
+      acceptanceRate: 40,
+      applicationFee: 800,
+      deadline: '2024-09-30',
+      essaysRequired: 0,
+      tuition: 62000,
+      studentCount: 46000,
+      programs: 'Agriculture, Engineering, Health Sciences, Humanities, Law',
+      requirements: 'NSC with Bachelor Pass, APS 30+, English proficiency'
+    },
+    {
+      id: '7',
+      universityName: 'University of the Western Cape',
+      location: 'Cape Town, Western Cape',
+      ranking: 8,
+      gpaRequired: '2.8+',
+      satRange: '950-1150',
+      acceptanceRate: 45,
+      applicationFee: 750,
+      deadline: '2024-10-31',
+      essaysRequired: 0,
+      tuition: 55000,
+      studentCount: 24000,
+      programs: 'Natural Sciences, Economic Sciences, Law, Education, Community Health',
+      requirements: 'NSC with Bachelor Pass, APS 28+, Mathematics or Math Lit'
+    },
+    {
+      id: '8',
+      universityName: 'Nelson Mandela University',
+      location: 'Port Elizabeth, Eastern Cape',
+      ranking: 9,
+      gpaRequired: '2.9+',
+      satRange: '980-1180',
+      acceptanceRate: 42,
+      applicationFee: 850,
+      deadline: '2024-08-31',
+      essaysRequired: 0,
+      tuition: 58000,
+      studentCount: 27000,
+      programs: 'Business, Engineering, Health Sciences, Law, Science',
+      requirements: 'NSC with Bachelor Pass, APS 28+, Subject-specific requirements'
+    }
+  ];
+
+  // Calculate match scores and categorize based on profile
+  const recommendations: Recommendation[] = universities.map(uni => {
+    let matchScore = 50; // Base score
+    let category: 'Safety' | 'Target' | 'Reach' = 'Target';
+    let reasoning = '';
+    
+    // GPA comparison
+    const requiredGPA = parseFloat(uni.gpaRequired);
+    const gpaGap = profile.gpa - requiredGPA;
+    
+    if (gpaGap >= 0.5) {
+      matchScore += 25;
+      category = 'Safety';
+      reasoning = `Your GPA of ${profile.gpa} exceeds the typical requirement of ${uni.gpaRequired}. `;
+    } else if (gpaGap >= 0) {
+      matchScore += 15;
+      category = 'Target';
+      reasoning = `Your GPA of ${profile.gpa} meets the requirement of ${uni.gpaRequired}. `;
+    } else if (gpaGap >= -0.3) {
+      matchScore += 5;
+      category = 'Target';
+      reasoning = `Your GPA is slightly below the typical requirement, but still competitive. `;
+    } else {
+      matchScore -= 10;
+      category = 'Reach';
+      reasoning = `This is a reach school given the GPA requirements, but worth applying if you love the program. `;
+    }
+    
+    // SAT comparison if provided
+    if (profile.sat && uni.satRange) {
+      const [minSAT, maxSAT] = uni.satRange.split('-').map(s => parseInt(s));
+      const midSAT = (minSAT + maxSAT) / 2;
+      
+      if (profile.sat >= maxSAT) {
+        matchScore += 15;
+        reasoning += `Your SAT score is in the top range for admitted students. `;
+      } else if (profile.sat >= midSAT) {
+        matchScore += 10;
+        reasoning += `Your SAT score is competitive for this university. `;
+      } else if (profile.sat >= minSAT) {
+        matchScore += 5;
+        reasoning += `Your SAT score meets the minimum requirements. `;
+      }
+    }
+    
+    // Acceptance rate factor
+    if (uni.acceptanceRate < 20) {
+      matchScore -= 10;
+      if (category === 'Target') category = 'Reach';
+      reasoning += `Highly selective with ${uni.acceptanceRate}% acceptance rate. `;
+    } else if (uni.acceptanceRate > 35) {
+      matchScore += 10;
+      reasoning += `Good acceptance rate of ${uni.acceptanceRate}%. `;
+    }
+    
+    // Major alignment (mock)
+    if (profile.intendedMajor) {
+      matchScore += 5;
+      reasoning += `Strong programs in your area of interest. `;
+    }
+    
+    // Normalize score to 0-100
+    matchScore = Math.max(20, Math.min(95, matchScore));
+    
+    // Determine academic and financial fit
+    const academicFit: 'Excellent' | 'Good' | 'Fair' = 
+      matchScore >= 80 ? 'Excellent' : 
+      matchScore >= 60 ? 'Good' : 'Fair';
+      
+    const financialFit: 'Good' | 'Moderate' | 'Challenging' = 
+      uni.tuition < 60000 ? 'Good' :
+      uni.tuition < 80000 ? 'Moderate' : 'Challenging';
+    
+    return {
+      university: uni,
+      matchScore,
+      category,
+      reasoning: reasoning.trim(),
+      academicFit,
+      financialFit
+    };
+  });
+
+  // Generate profile analysis
+  const profileAnalysis: ProfileAnalysis = {
+    strengths: [],
+    areasForImprovement: [],
+    suggestions: []
+  };
+
+  // Analyze strengths
+  if (profile.gpa >= 3.5) {
+    profileAnalysis.strengths.push('Strong academic performance with GPA above 3.5');
+  }
+  if (profile.sat && profile.sat >= 1300) {
+    profileAnalysis.strengths.push('Competitive SAT score for top universities');
+  }
+  if (profile.extracurriculars && profile.extracurriculars.length > 3) {
+    profileAnalysis.strengths.push('Diverse extracurricular activities');
+  }
+
+  // Areas for improvement
+  if (profile.gpa < 3.0) {
+    profileAnalysis.areasForImprovement.push('GPA could be stronger for competitive programs');
+  }
+  if (!profile.sat && !profile.act) {
+    profileAnalysis.areasForImprovement.push('Consider taking SAT or ACT for more opportunities');
+  }
+  if (!profile.extracurriculars || profile.extracurriculars.length < 2) {
+    profileAnalysis.areasForImprovement.push('Limited extracurricular activities');
+  }
+
+  // Suggestions
+  profileAnalysis.suggestions.push('Apply to a mix of safety, target, and reach schools');
+  profileAnalysis.suggestions.push('Start applications early to meet all deadlines');
+  if (recommendations.filter(r => r.category === 'Safety').length < 2) {
+    profileAnalysis.suggestions.push('Consider adding more safety schools to your list');
+  }
+
+  return { recommendations, profileAnalysis };
+};
 
 const INITIAL_FILTERS: RecommendationFilters = {
   categories: ['Safety', 'Target', 'Reach'],
@@ -51,11 +345,20 @@ const INITIAL_FILTERS: RecommendationFilters = {
 };
 
 const Recommendations: React.FC = () => {
+  // Default profile - in real app, this would come from API/context
+  const [profile] = useState<StudentProfile>({
+    gpa: 3.4,
+    sat: 1250,
+    act: 28,
+    intendedMajor: 'Computer Science',
+    extracurriculars: ['Debate Club', 'Chess Team', 'Volunteer Work', 'Part-time Job'],
+    essays: 3,
+    location: 'Gauteng'
+  });
+
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [profileAnalysis, setProfileAnalysis] = useState<ProfileAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<RecommendationFilters>(INITIAL_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
   const [savedUniversities, setSavedUniversities] = useState<Set<string>>(new Set());
@@ -69,43 +372,14 @@ const Recommendations: React.FC = () => {
 
   const loadRecommendations = async () => {
     setLoading(true);
-    setError(null);
     
-    try {
-      // First, try to get the profile
-      const profileResponse = await getProfile();
-      
-      if (!profileResponse.success || !profileResponse.data) {
-        setError('Please complete your profile to get personalized recommendations.');
-        setLoading(false);
-        return;
-      }
-
-      const userProfile = profileResponse.data;
-      
-      if (!userProfile.gpa) {
-        setError('Please add your GPA to your profile to get recommendations.');
-        setLoading(false);
-        return;
-      }
-      
-      setProfile(userProfile);
-      
-      // Get recommendations based on profile
-      const response = await getRecommendations(userProfile);
-      
-      if (response.success && response.data) {
-        setRecommendations(response.data.recommendations || []);
-        setProfileAnalysis(response.data.profileAnalysis || null);
-      } else {
-        throw new Error(response.message || 'Failed to get recommendations');
-      }
-    } catch (error: any) {
-      console.error('Error loading recommendations:', error);
-      setError(error.message || 'Failed to load recommendations');
-    } finally {
+    // Simulate API call
+    setTimeout(() => {
+      const { recommendations: recs, profileAnalysis: analysis } = generateMockRecommendations(profile);
+      setRecommendations(recs);
+      setProfileAnalysis(analysis);
       setLoading(false);
-    }
+    }, 1500);
   };
 
   const refreshRecommendations = async () => {
@@ -117,35 +391,19 @@ const Recommendations: React.FC = () => {
   // Filter and sort recommendations
   const filteredAndSortedRecommendations = useMemo(() => {
     let filtered = recommendations.filter(rec => {
-      // Category filter
       if (!filters.categories.includes(rec.category)) return false;
-      
-      // Match score filter
       if (rec.matchScore < filters.minMatchScore) return false;
-      
-      // Application fee filter
-      if (filters.maxApplicationFee !== null && 
-          rec.university.applicationFee && 
-          rec.university.applicationFee > filters.maxApplicationFee) return false;
-      
-      // Location filter
+      if (filters.maxApplicationFee !== null && rec.university.applicationFee > filters.maxApplicationFee) return false;
       if (filters.location.length > 0) {
-        const universityLocation = rec.university.location.toLowerCase();
         const hasMatchingLocation = filters.location.some(loc => 
-          universityLocation.includes(loc.toLowerCase())
+          rec.university.location.toLowerCase().includes(loc.toLowerCase())
         );
         if (!hasMatchingLocation) return false;
       }
-      
-      // Essays filter
-      if (filters.maxEssays !== null && 
-          rec.university.essaysRequired && 
-          rec.university.essaysRequired > filters.maxEssays) return false;
-      
+      if (filters.maxEssays !== null && rec.university.essaysRequired > filters.maxEssays) return false;
       return true;
     });
 
-    // Sort recommendations
     filtered.sort((a, b) => {
       let aVal: any, bVal: any;
       
@@ -256,11 +514,7 @@ const Recommendations: React.FC = () => {
 
   const formatCurrency = (amount?: number) => {
     if (!amount) return 'N/A';
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      maximumFractionDigits: 0,
-    }).format(amount);
+    return `R${amount.toLocaleString()}`;
   };
 
   const formatDate = (dateString?: string) => {
@@ -286,34 +540,6 @@ const Recommendations: React.FC = () => {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading your personalized recommendations...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center space-x-3 text-red-600 mb-4">
-          <ExclamationTriangleIcon className="h-8 w-8" />
-          <h2 className="text-xl font-semibold">Unable to Load Recommendations</h2>
-        </div>
-        <p className="text-gray-600 mb-4">{error}</p>
-        <div className="flex space-x-3">
-          {error.includes('profile') && (
-            <a
-              href="/profile"
-              className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              Complete Profile
-            </a>
-          )}
-          <button
-            onClick={loadRecommendations}
-            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-          >
-            Try Again
-          </button>
         </div>
       </div>
     );
@@ -656,25 +882,6 @@ const Recommendations: React.FC = () => {
           )}
         </div>
       </div>
-
-      {/* Empty State */}
-      {recommendations.length === 0 && (
-        <div className="bg-white rounded-lg shadow p-12 text-center">
-          <ChartBarIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">
-            No Recommendations Available
-          </h3>
-          <p className="text-gray-500 mb-4">
-            Complete your profile to get personalized university recommendations.
-          </p>
-          <a
-            href="/profile"
-            className="inline-block px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            Complete Profile
-          </a>
-        </div>
-      )}
     </div>
   );
 };
